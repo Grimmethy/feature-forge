@@ -122,7 +122,8 @@ class ChecklistRouteTests(unittest.TestCase):
             (repo_root / "features" / "feature-forge" / "checklist.md").read_text(encoding="utf-8")))}
         self.assertTrue(items["FF-2"]["ticked"])
         self.assertEqual((items["FF-2"]["meta"]["manual"], items["FF-2"]["meta"]["merged"]), ("true", "de08292"))
-        self.assertFalse(items["FF-3"]["ticked"])
+        self.assertTrue(items["FF-3"]["ticked"] and items["FF-3"]["meta"]["merged"] == "152ddcf")
+        self.assertFalse(items["FF-4"]["ticked"])
 
 
 if __name__ == "__main__":
