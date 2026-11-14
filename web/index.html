@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Feature Forge</title>
+<style>
+:root{--bg:#14151a;--panel:#1c1e25;--line:#2c2f3a;--text:#e6e6ea;--muted:#9a9aa6;--accent:#d9a441;--ok:#5fb37a}
+@media (prefers-color-scheme:light){:root{--bg:#f6f4ef;--panel:#fff;--line:#d9d5ca;--text:#1d1d22;--muted:#6c6c78;--accent:#9a6a00;--ok:#2e7d4f}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,sans-serif;display:flex;height:100vh}
+#side{width:340px;min-width:260px;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+#side header{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+#side header b{flex:1;font-size:16px}
+#q{margin:8px 12px 4px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--text)}
+#filters{display:flex;flex-wrap:wrap;gap:4px;padding:4px 12px 8px}
+#list{overflow:auto;flex:1}
+.card{padding:8px 12px;border-top:1px solid var(--line);cursor:pointer}
+.card:hover{background:rgba(127,127,127,.12)}.card.on{background:rgba(217,164,65,.18)}
+.card .t{display:flex;justify-content:space-between;gap:8px}.card .t span:first-child{font-weight:600}
+.card small{color:var(--muted)}
+.chip{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.chip.Done{color:var(--ok);border-color:var(--ok)}.chip.Building,.chip.Filed{color:var(--accent);border-color:var(--accent)}
+.bar{height:5px;background:var(--line);border-radius:3px;margin-top:5px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ok)}
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+#top{display:flex;gap:8px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+#top .path{flex:1;font-family:ui-monospace,monospace;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+button{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+button.on,button.primary{border-color:var(--accent);color:var(--accent)}
+#body{flex:1;display:flex;min-height:0}
+#tree{width:210px;border-right:1px solid var(--line);overflow:auto;padding:6px 0;display:none}
+.f{padding:4px 14px;cursor:pointer;font-size:13px;display:flex;justify-content:space-between;gap:6px}
+.f:hover{background:rgba(127,127,127,.12)}.f.on{color:var(--accent);background:rgba(217,164,65,.18)}.f small{color:var(--muted)}
+#view{flex:1;overflow:auto;padding:20px 28px;max-width:880px}
+#view table{border-collapse:collapse}#view td,#view th{border:1px solid var(--line);padding:4px 8px}
+#edit{flex:1;display:none;border:0;padding:20px 28px;background:var(--bg);color:var(--text);font:14px/1.5 ui-monospace,monospace;resize:none;outline:none}
+.row{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line)}
+.row .id{font-family:ui-monospace,monospace;color:var(--muted);min-width:42px}.row.done .ti{text-decoration:line-through;color:var(--muted)}
+.row small{color:var(--muted)}.tag{font-size:11px;border:1px solid var(--line);border-radius:8px;padding:0 6px;margin-left:4px}
+.hit{padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer}.hit small{color:var(--muted);display:block}
+form.nf{display:flex;flex-direction:column;gap:8px;max-width:620px}
+form.nf input,form.nf textarea{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px;font:inherit}
+form.nf textarea{min-height:180px}
+#toast{position:fixed;right:16px;bottom:16px;background:var(--panel);border:1px solid var(--accent);border-radius:8px;padding:8px 14px;opacity:0;pointer-events:none}
+#toast.show{animation:fade 4s forwards}@keyframes fade{0%,80%{opacity:1}100%{opacity:0}}
+</style></head><body>
+<div id="side">
+  <header><b>Feature Forge</b><button id="bNew" class="primary" title="Describe a new feature">+ New</button><button id="bRefresh" title="Reload the library">Refresh</button></header>
+  <input id="q" placeholder="Search every feature (press Enter)">
+  <div id="filters"></div>
+  <div id="list"></div>
+</div>
+<div id="main">
+  <div id="top"><span class="path" id="path">Pick a feature, or create one.</span>
+    <button id="bView" class="on" style="display:none">View</button><button id="bEdit" style="display:none">Edit</button><button id="bSave" class="primary" style="display:none">Save</button></div>
+  <div id="body"><div id="tree"></div><div id="view"></div><textarea id="edit" spellcheck="false"></textarea></div>
+</div>
+<div id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);
+const STATUSES=['Grilling','Planned','Filed','Building','Done'];
+let features=[],filter='All',cur=null,curPath=null,editing=false;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(m){const t=$('toast');t.textContent=m;t.classList.remove('show');void t.offsetWidth;t.classList.add('show')}
+async function api(url,opt){const r=await fetch(url,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
+const post=(url,body,method)=>api(url,{method:method||'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+
+function renderFilters(){
+  const counts={All:features.length};STATUSES.forEach(s=>counts[s]=features.filter(f=>f.status===s).length);
+  $('filters').innerHTML=['All',...STATUSES].map(s=>`<button data-f="${s}" class="${s===filter?'on':''}">${s} ${counts[s]}</button>`).join('');
+}
+function renderList(){
+  const rows=features.filter(f=>filter==='All'||f.status===filter);
+  $('list').innerHTML=rows.length?rows.map(f=>{const pct=f.total?Math.round(100*f.ticked/f.total):0;
+    return `<div class="card ${f.slug===cur?'on':''}" data-s="${esc(f.slug)}"><div class="t"><span>${esc(f.title)}</span><span class="chip ${f.status}">${f.status}</span></div>
+    <small>${f.ticked}/${f.total} done${f.repo?' · '+esc(f.repo):''}</small><div class="bar"><i style="width:${pct}%"></i></div></div>`}).join('')
+    :'<div class="card"><small>No features in this view.</small></div>';
+}
+async function loadLibrary(){features=await api('/api/features');renderFilters();renderList()}
+
+function clearMain(){$('view').style.display='block';$('edit').style.display='none';editing=false}
+function showButtons(on){['bView','bEdit'].forEach(b=>$(b).style.display=on?'':'none');$('bSave').style.display='none'}
+function parseChecklist(text){
+  return text.split('\n').map(l=>l.match(/^- \[( |x|X)\] (FF-\d+) (.*?)\s*(?:<!--(.*?)-->)?\s*$/)).filter(Boolean).map(m=>{
+    const meta={};let k=null;(m[4]||'').split(/\s+/).filter(Boolean).forEach(t=>{if(t.endsWith(':')){k=t.slice(0,-1);meta[k]=''}else if(k)meta[k]=(meta[k]+' '+t).trim()});
+    return {ticked:m[1]!==' ',id:m[2],title:m[3],meta}});
+}
+function checklistHtml(text){
+  const items=parseChecklist(text);if(!items.length)return '<p><small>No checklist items yet.</small></p>';
+  return items.map(i=>`<div class="row ${i.ticked?'done':''}"><input type="checkbox" disabled ${i.ticked?'checked':''}><span class="id">${esc(i.id)}</span>
+    <span class="ti">${esc(i.title)}${i.meta.premium==='true'?'<span class="tag">premium</span>':''}${i.meta.cloud==='true'?'<span class="tag">cloud</span>':''}
+    ${i.meta.deps?`<br><small>after ${esc(i.meta.deps)}</small>`:''}</span></div>`).join('');
+}
+async function openFeature(slug,path){
+  cur=slug;renderList();clearMain();showButtons(true);$('tree').style.display='block';
+  const tree=await api(`/api/features/${slug}/tree`);
+  $('tree').innerHTML=tree.map(t=>`<div class="f" data-p="${esc(t.path)}"><span>${esc(t.path)}</span><small>${t.words}</small></div>`).join('');
+  await openFile(path||(tree.find(t=>t.path==='checklist.md')?'checklist.md':tree[0]&&tree[0].path))
+}
+async function openFile(path){
+  if(!cur||!path)return;curPath=path;clearMain();
+  $('path').textContent=`${cur}/${path}`;$('bView').className='on';$('bEdit').className='';$('bSave').style.display='none';
+  document.querySelectorAll('#tree .f').forEach(e=>e.classList.toggle('on',e.dataset.p===path));
+  if(path==='checklist.md'){const f=await api(`/api/features/${cur}/file?path=${encodeURIComponent(path)}`);$('view').innerHTML=checklistHtml(f.text);return}
+  const r=await api(`/api/features/${cur}/render?path=${encodeURIComponent(path)}`);$('view').innerHTML=r.html;
+}
+async function startEdit(){
+  if(!cur||!curPath)return;const f=await api(`/api/features/${cur}/file?path=${encodeURIComponent(curPath)}`);
+  $('edit').value=f.text;$('view').style.display='none';$('edit').style.display='block';editing=true;
+  $('bView').className='';$('bEdit').className='on';$('bSave').style.display='';
+}
+async function save(){
+  try{await post(`/api/features/${cur}/file?path=${encodeURIComponent(curPath)}`,{text:$('edit').value},'PUT');toast('Saved');await loadLibrary();await openFeature(cur,curPath)}
+  catch(e){toast('Save failed: '+e.message)}
+}
+function newForm(){
+  cur=null;curPath=null;renderList();showButtons(false);$('tree').style.display='none';clearMain();$('path').textContent='New feature';
+  $('view').innerHTML=`<form class="nf" id="nf"><h2>New feature</h2><input id="nt" placeholder="Title" required>
+    <textarea id="nr" placeholder="What do you want built? Name the repo if you know it (a line 'repo: name' is picked up)."></textarea>
+    <div><button class="primary" type="submit">Create</button></div></form>`;
+  $('nf').onsubmit=async ev=>{ev.preventDefault();
+    try{const r=await post('/api/features',{title:$('nt').value,request:$('nr').value});await loadLibrary();await openFeature(r.slug)}catch(e){toast(e.message)}};
+}
+async function runSearch(){
+  const q=$('q').value.trim();if(!q)return;cur=null;renderList();showButtons(false);$('tree').style.display='none';clearMain();$('path').textContent=`Search: ${q}`;
+  const hits=await api('/api/search?q='+encodeURIComponent(q));
+  $('view').innerHTML=hits.length?hits.map(h=>`<div class="hit" data-s="${esc(h.slug)}" data-p="${esc(h.path)}"><b>${esc(h.slug)}/${esc(h.path)}</b><small>${esc(h.snippet)}</small></div>`).join(''):'<p><small>No matches.</small></p>';
+}
+document.addEventListener('click',async ev=>{
+  const t=ev.target.closest('[data-f],[data-s],[data-p],a[data-md]');if(!t)return;
+  try{
+    if(t.dataset.f){filter=t.dataset.f;renderFilters();renderList()}
+    else if(t.matches('a[data-md]')){ev.preventDefault();await openFile(t.dataset.md)}
+    else if(t.classList.contains('hit'))await openFeature(t.dataset.s,t.dataset.p);
+    else if(t.classList.contains('card')&&t.dataset.s)await openFeature(t.dataset.s);
+    else if(t.classList.contains('f'))await openFile(t.dataset.p);
+  }catch(e){toast(e.message)}
+});
+$('q').addEventListener('keydown',ev=>{if(ev.key==='Enter')runSearch().catch(e=>toast(e.message))});
+$('bNew').onclick=newForm;$('bRefresh').onclick=()=>loadLibrary().then(()=>{if(cur&&!editing)openFeature(cur,curPath)}).catch(e=>toast(e.message));
+$('bView').onclick=()=>openFile(curPath).catch(e=>toast(e.message));$('bEdit').onclick=()=>startEdit().catch(e=>toast(e.message));$('bSave').onclick=save;
+loadLibrary().catch(e=>toast(e.message));
+</script></body></html>
