@@ -1,0 +1,256 @@
+"""Grill sessions: an interview about one feature, run through the Agent Manager chat plugin.
+
+Feature Forge itself never calls a model. It builds a seed prompt, opens a READ-ONLY chat session (Claude can Read,
+Grep and Glob the repos, never change them), relays the stream, and saves the transcript into the feature's
+interview.md. Standard library only, so it runs under a bare python3.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from . import store
+
+PROTOCOL_PATH = Path(__file__).resolve().parents[2] / "Docs" / "GRILL_PROTOCOL.md"
+DEFAULT_ACCOUNT = "claude-main"
+CONTEXT_CAP = 40_000            # characters of context put into the seed
+FILE_CAP = 8_000                # per context file
+TREE_CAP = 120                  # lines of the repo file tree
+REPO_DOCS = ("CONTEXT.md", "CLAUDE.md", "AGENTS.md", "README.md")
+SKIP_REPO = re.compile(r"(-pipeline|-manual|-BACKUP|-hub-p\d+|-wake-others\d*|-test-tmp)", re.I)
+BOOKKEEPING_RE = re.compile(r"^(CONTEXT-LOG|TASK-REF):.*$", re.M)
+
+_urlopen = urllib.request.urlopen     # tests replace this
+
+
+class GrillError(RuntimeError):
+    pass
+
+
+def chat_base() -> str:
+    return os.environ.get("FEATUREFORGE_CHAT_URL", "http://127.0.0.1:7442").rstrip("/")
+
+
+def repos_root() -> Path:
+    return Path(os.environ.get("FEATUREFORGE_REPOS_ROOT", "/media/model-cache/github"))
+
+
+# ---- the chat plugin ----------------------------------------------------------------------------------
+
+def _call(method: str, path: str, body: dict | None = None, timeout: float = 30, stream: bool = False):
+    data = json.dumps(body if body is not None else {}).encode("utf-8") if method == "POST" else None
+    req = urllib.request.Request(chat_base() + path, data=data, method=method, headers={"Content-Type": "application/json"})
+    try:
+        resp = _urlopen(req, timeout=timeout)
+        if stream:
+            return resp
+        with resp:
+            return json.load(resp)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise GrillError(f"chat plugin unavailable: {e}") from e
+
+
+# ---- repos ---------------------------------------------------------------------------------------------
+
+def repo_index(root: Path | None = None) -> list[dict]:
+    """Existing repositories under the repos root: name, path and the first prose line of their README or CONTEXT."""
+    base = Path(root) if root is not None else repos_root()
+    out = []
+    if not base.is_dir():
+        return out
+    for d in sorted(p for p in base.iterdir() if p.is_dir() and (p / ".git").exists() and not SKIP_REPO.search(p.name)):
+        summary = ""
+        for doc in ("CONTEXT.md", "README.md"):
+            f = d / doc
+            if f.is_file():
+                lines = [ln.strip() for ln in f.read_text(encoding="utf-8", errors="replace").splitlines()]
+                summary = next((ln for ln in lines if ln and not ln.startswith(("#", "<", "---", "```"))), "")[:160]
+                if summary:
+                    break
+        out.append({"name": d.name, "path": str(d), "summary": summary})
+    return out
+
+
+def target_repo(slug: str, root: Path | None = None, repos: Path | None = None) -> dict:
+    """The repo named by a 'repo: <name>' line in request.md: {name, path, exists}; name is '' when none is chosen yet."""
+    text = store.read_file(slug, "request.md", root)
+    m = re.search(r"^repo:\s*(\S+)\s*$", text, re.M | re.I)
+    if not m:
+        return {"name": "", "path": "", "exists": False}
+    name = m.group(1)
+    path = (Path(repos) if repos is not None else repos_root()) / name
+    return {"name": name, "path": str(path), "exists": (path / ".git").exists()}
+
+
+def _capped(p: Path, cap: int) -> str:
+    t = p.read_text(encoding="utf-8", errors="replace")
+    return t if len(t) <= cap else t[:cap] + "\n[...truncated...]"
+
+
+def _tree(repo: Path) -> str:
+    lines = []
+    for p in sorted(repo.rglob("*")):
+        rel = p.relative_to(repo)
+        if any(part.startswith(".") or part in ("node_modules", "__pycache__") for part in rel.parts) or len(rel.parts) > 2:
+            continue
+        lines.append(rel.as_posix() + ("/" if p.is_dir() else ""))
+        if len(lines) >= TREE_CAP:
+            lines.append("[...more files...]")
+            break
+    return "\n".join(lines)
+
+
+# ---- seed ------------------------------------------------------------------------------------------------
+
+def build_seed(slug: str, root: Path | None = None, repos: Path | None = None, protocol: Path | None = None) -> str:
+    fdir = store.feature_dir(slug, root)
+    proto = Path(protocol) if protocol is not None else PROTOCOL_PATH
+    protocol_text = proto.read_text(encoding="utf-8") if proto.is_file() else ""
+    parts, used = [], 0
+
+    def add(label: str, text: str) -> None:
+        nonlocal used
+        if text.strip() and used < CONTEXT_CAP:
+            used += len(text)
+            parts.append(f"### {label}\n\n{text}")
+
+    for name in ("request.md", "plan.md", "interview.md", "checklist.md"):
+        f = fdir / name
+        if f.is_file():
+            add(f"feature file `{name}`", _capped(f, FILE_CAP))
+    tgt = target_repo(slug, root, repos)
+    if tgt["exists"]:
+        repo = Path(tgt["path"])
+        for doc in REPO_DOCS:
+            if (repo / doc).is_file():
+                add(f"target repo `{tgt['name']}`: `{doc}`", _capped(repo / doc, FILE_CAP))
+        add(f"target repo `{tgt['name']}`: file tree", _tree(repo))
+        target = (f"The target repo is `{tgt['name']}` at `{tgt['path']}`. You can Read, Grep and Glob there (and in the "
+                  "other repos); look things up instead of asking the owner.")
+    elif tgt["name"]:
+        target = (f"The owner named a NEW repo `{tgt['name']}` that does not exist yet (it would live at `{tgt['path']}`). "
+                  "Read the existing repos listed below for conventions.")
+    else:
+        index = "\n".join(f"- `{r['name']}`: {r['summary']}" for r in repo_index(repos))
+        add("existing repositories", index)
+        target = ("No target repo is chosen yet. Question 1 of your first round MUST be the repo: recommend an existing repo "
+                  "from the list below or a new one (propose its name), say why, and let the owner decide.")
+    return (
+        f"You are running a Feature Forge grill session for the feature `{slug}`.\n\n"
+        "Follow this protocol exactly. This conversation is READ-ONLY: use Read, Grep and Glob to look things up, never try "
+        "to change a file. The Forge saves the transcript itself.\n\n"
+        f"## Protocol\n\n{protocol_text}\n\n## Target\n\n{target}\n\n## Context\n\n" + "\n\n".join(parts) +
+        "\n\n## Now\n\nRead the context, then ask the owner the first round: the whole frontier, numbered, each question "
+        "with your recommended answer. Do not ask for anything you can look up.\n")
+
+
+# ---- sessions (features/<slug>/.grill/<id>.json) ------------------------------------------------------------
+
+def _meta_path(slug: str, sid: str, root: Path | None) -> Path:
+    if not sid or not all(c.isalnum() or c == "-" for c in sid):
+        raise GrillError("bad session id")
+    return store.feature_dir(slug, root) / ".grill" / f"{sid}.json"
+
+
+def load_meta(slug: str, sid: str, root: Path | None = None) -> dict:
+    p = _meta_path(slug, sid, root)
+    if not p.is_file():
+        raise GrillError("no such grill session")
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def save_meta(slug: str, meta: dict, root: Path | None = None) -> None:
+    p = _meta_path(slug, meta["id"], root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+def list_sessions(slug: str, root: Path | None = None) -> list[dict]:
+    d = store.feature_dir(slug, root) / ".grill"
+    if not d.is_dir():
+        return []
+    return sorted((json.loads(p.read_text(encoding="utf-8")) for p in d.glob("*.json")),
+                  key=lambda m: m.get("started", ""), reverse=True)
+
+
+def start(slug: str, node: str = "feature", account: str | None = None, root: Path | None = None) -> dict:
+    """Open a read-only Claude chat session for this feature (node: 'feature' or a checklist item id like FF-3)."""
+    store.feature_dir(slug, root)
+    sid = _call("POST", "/api/chat/new", {"provider": "claude", "readOnly": True})["id"]
+    _call("POST", f"/api/chat/{sid}/swap", {"provider": "claude", "account": account or DEFAULT_ACCOUNT})
+    meta = {"id": sid, "feature": slug, "node": node, "provider": "claude", "account": account or DEFAULT_ACCOUNT,
+            "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "saved": False, "seeded": False}
+    save_meta(slug, meta, root)
+    return meta
+
+
+def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = None, repos: Path | None = None):
+    """Yield the chat plugin's server-sent-event lines. message=None sends the seed (the first turn)."""
+    meta = load_meta(slug, sid, root)
+    if message is None:
+        text = build_seed(slug, root, repos)
+        meta["seeded"] = True
+        save_meta(slug, meta, root)
+    else:
+        text = message
+    try:
+        resp = _call("POST", f"/api/chat/{sid}/message", {"message": text}, timeout=900, stream=True)
+        with resp:
+            for raw in resp:
+                yield (raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw).rstrip("\r\n") + "\n"
+    except GrillError as e:
+        yield "data: " + json.dumps({"type": "error", "error": str(e)}) + "\n\n"
+
+
+def transcript(sid: str) -> list[dict]:
+    return _call("GET", f"/api/chat/{sid}").get("transcript") or []
+
+
+# ---- saving ----------------------------------------------------------------------------------------------
+
+def format_transcript(entries: list[dict]) -> str:
+    """Question and answer blocks. The seed (the first user message) and marker rows are left out; the owner's answers stay verbatim."""
+    out, seen_seed = [], False
+    for e in entries:
+        if e.get("marker") or e.get("role") not in ("user", "assistant"):
+            continue
+        text = BOOKKEEPING_RE.sub("", e.get("display_text") or e.get("text") or "").strip()
+        if not text:
+            continue
+        if e["role"] == "user" and not seen_seed:
+            seen_seed = True
+            continue
+        if e["role"] == "user":
+            out.append("**Owner:**\n\n" + text)
+        elif seen_seed:
+            out.append("**Grill:**\n\n" + text)
+    return "\n\n---\n\n".join(out)
+
+
+def save_to_interview(slug: str, sid: str, root: Path | None = None) -> dict:
+    meta = load_meta(slug, sid, root)
+    body = format_transcript(transcript(sid))
+    if not body:
+        raise GrillError("nothing to save yet")
+    current = store.read_file(slug, "interview.md", root).replace("_Not started._", "").rstrip()
+    block = f"\n\n## Session {time.strftime('%Y-%m-%d %H:%M')} ({meta['node']}, chat {sid})\n\n{body}\n"
+    store.write_file(slug, "interview.md", current + block, root)
+    meta["saved"] = True
+    save_meta(slug, meta, root)
+    return {"path": "interview.md", "words": len(body.split())}
+
+
+def end(slug: str, sid: str, root: Path | None = None) -> dict:
+    meta = load_meta(slug, sid, root)
+    try:
+        _call("POST", f"/api/chat/{sid}/close")
+    except GrillError:
+        pass
+    meta["ended"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    save_meta(slug, meta, root)
+    return meta
