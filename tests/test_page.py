@@ -55,6 +55,13 @@ class PageTests(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, SCRIPT)
 
+    def test_the_view_buttons_are_wired_to_the_view_routes(self):
+        for ident in ("bBoard", "bRepos", "bGraph"):
+            self.assertIn(f'id="{ident}"', PAGE)
+        for needle in ("/api/views/board", "/api/views/repos", "/api/features/${cur}/graph.svg", "data-col", "data-repo", "(no repo yet)"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, SCRIPT)
+
     def test_a_refused_op_cannot_be_ticked(self):
         self.assertIn("r.ok?'checked':'disabled'", SCRIPT)
 
