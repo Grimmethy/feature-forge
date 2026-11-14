@@ -51,7 +51,7 @@ form.nf textarea{min-height:180px}
 .repo-opt{padding:6px 0;border-bottom:1px solid var(--line)}.repo-opt small{color:var(--muted);display:block}
 #prop{border-top:1px solid var(--line);padding:8px;display:none;max-height:40%;overflow:auto;font-size:13px}
 .pop{padding:4px 0;border-bottom:1px solid var(--line)}.pop.bad{color:var(--muted)}
-.row .acts{margin-left:auto}.tag.lock{color:var(--accent);border-color:var(--accent)}
+.row .acts{margin-left:auto;text-align:right}.warn{color:var(--accent)}.row .acts button{margin-left:4px}.row .acts small{display:block}.tag.lock{color:var(--accent);border-color:var(--accent)}
 form.rf{display:flex;flex-direction:column;gap:8px;max-width:620px}
 form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px;font:inherit}
 </style></head><body>
@@ -99,13 +99,23 @@ async function loadLibrary(){features=await api('/api/features');renderFilters()
 
 function clearMain(){$('view').style.display='block';$('edit').style.display='none';editing=false}
 function showButtons(on){['bRepo','bGrill','bView','bEdit'].forEach(b=>$(b).style.display=on?'':'none');$('bSave').style.display='none'}
+let lintArmed=new Set();
+function actionsHtml(i){const m=i.meta||{};let h='';
+  if(!i.ticked){
+    h+=`<button data-flag="premium" data-id="${esc(i.id)}" data-val="${m.premium==='true'?'false':'true'}" title="Premium puts the task at the front of the queue">${m.premium==='true'?'Premium: on':'Premium: off'}</button>`;
+    if(!i.locked)h+=`<button data-flag="cloud" data-id="${esc(i.id)}" data-val="${m.cloud==='true'?'false':'true'}" title="Cloud sends the task to the Sonnet cloud lane">${m.cloud==='true'?'Cloud: on':'Cloud: off'}</button>`;
+    if(!i.locked){const armed=lintArmed.has(i.id);
+      h+=`<button class="primary" data-file="${esc(i.id)}" title="Queue this item as an Agent Manager task">${armed?'File anyway':'File'}</button>`;
+      if(i.lint&&i.lint.length)h+=`<br><small class="warn">Polling language: ${esc(i.lint.join(', '))}. Reword it to use a trigger${armed?', or press File anyway':''}.</small>`}
+    else h+=`<br><small>task ${esc(m.task||'')}</small>`}
+  return h+`<button data-grill="${esc(i.id)}" title="Interview me about just this item">Grill</button>`}
 function checklistHtml(items){
   if(!items.length)return '<p><small>No checklist items yet.</small></p>';
   return items.map(i=>{const m=i.meta||{};
     return `<div class="row ${i.ticked?'done':''}" data-item="${esc(i.id)}"><input type="checkbox" disabled ${i.ticked?'checked':''}><span class="id">${esc(i.id)}</span>
     <span class="ti">${esc(i.title)}${m.premium==='true'?'<span class="tag">premium</span>':''}${m.cloud==='true'?'<span class="tag">cloud</span>':''}${i.locked?'<span class="tag lock">filed</span>':''}${m.changed?`<span class="tag">changed since filing ${esc(m.changed)}</span>`:''}${m.manual==='true'?'<span class="tag">ticked by hand</span>':''}
     ${(i.deps||[]).length?`<br><small>after ${esc(i.deps.join(', '))}</small>`:''}${i.body?`<br><small>${esc(i.body)}</small>`:''}</span>
-    <span class="acts"><button data-grill="${esc(i.id)}" title="Interview me about just this item">Grill</button></span></div>`}).join('');
+    <span class="acts">${actionsHtml(i)}</span></div>`}).join('');
 }
 async function openFeature(slug,path){
   cur=slug;renderList();clearMain();showButtons(true);$('tree').style.display='block';refreshRepo().catch(()=>{});
@@ -144,6 +154,14 @@ async function runSearch(){
 }
 document.addEventListener('click',async ev=>{
   const gb=ev.target.closest('[data-grill]');if(gb){itemGrill(gb.dataset.grill);return}
+  const fb=ev.target.closest('[data-file]'),pb=ev.target.closest('[data-flag]');
+  if(fb||pb){try{
+    if(pb){await post(`/api/features/${cur}/checklist/${pb.dataset.id}/flag`,{flag:pb.dataset.flag,value:pb.dataset.val==='true'})}
+    else{const id=fb.dataset.file,row=(await api(`/api/features/${cur}/checklist`)).find(r=>r.id===id);
+      if(row&&row.lint.length&&!lintArmed.has(id)){lintArmed.add(id);await openFile('checklist.md');return}
+      const r=await post(`/api/features/${cur}/checklist/${id}/file`,{acceptLint:lintArmed.has(id)});lintArmed.delete(id);
+      toast(`Filed ${id} as ${r.task}${r.premiumError?' (premium not set: '+r.premiumError+')':''}`);await loadLibrary()}
+    await openFile('checklist.md')}catch(e){toast(e.message)}return}
   const t=ev.target.closest('[data-f],[data-s],[data-p],a[data-md]');if(!t)return;
   try{
     if(t.dataset.f){filter=t.dataset.f;renderFilters();renderList()}
