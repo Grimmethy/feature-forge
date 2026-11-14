@@ -3,7 +3,7 @@
 Routes: GET / (the single-page UI), GET /api/health, GET|POST /api/features, GET /api/features/<slug>/tree,
 GET|PUT /api/features/<slug>/file?path=, GET /api/features/<slug>/render?path=, GET /api/search?q=,
 GET /api/repos, GET|POST /api/features/<slug>/repo, GET /api/features/<slug>/checklist, POST .../checklist/preview|apply,
-POST /api/features/<slug>/checklist/<id>/file|flag, POST /api/grill/<slug>/<sid>/proposal, and the grill routes: POST /api/grill/start,
+POST /api/features/<slug>/checklist/<id>/file|flag, POST /api/features/<slug>/sync, POST /api/grill/<slug>/<sid>/proposal, and the grill routes: POST /api/grill/start,
 GET /api/grill/<slug>/sessions, POST /api/grill/<slug>/<sid>/begin|message (server-sent events), /save and /end.
 No timers and no polling: every response is computed when asked.
 """
@@ -19,7 +19,7 @@ import markdown as md
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from server.core import checklist, filing, grill, store  # noqa: E402
+from server.core import checklist, filing, grill, status, store  # noqa: E402
 
 HREF_RE = re.compile(r'href="(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+\.md)"', re.I)
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -154,6 +154,11 @@ def create_app(root: Path | None = None) -> Flask:
                          "deps": checklist._deps(i), "body": "\n".join(i["body"]), "meta": i["meta"],
                          "lint": filing.lint(i["title"] + "\n" + "\n".join(i["body"]))}
                         for i in checklist.items(entries)])
+
+    @app.post("/api/features/<slug>/sync")
+    def feature_sync(slug):
+        """Read the filed items' task states from the project's queue folders and tick the merged ones. Called when a feature is opened or refreshed."""
+        return jsonify(status.sync(slug, froot()))
 
     @app.post("/api/features/<slug>/checklist/<item_id>/file")
     def checklist_file(slug, item_id):

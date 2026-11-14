@@ -99,7 +99,7 @@ async function loadLibrary(){features=await api('/api/features');renderFilters()
 
 function clearMain(){$('view').style.display='block';$('edit').style.display='none';editing=false}
 function showButtons(on){['bRepo','bGrill','bView','bEdit'].forEach(b=>$(b).style.display=on?'':'none');$('bSave').style.display='none'}
-let lintArmed=new Set();
+let lintArmed=new Set(),taskStates={};
 function actionsHtml(i){const m=i.meta||{};let h='';
   if(!i.ticked){
     h+=`<button data-flag="premium" data-id="${esc(i.id)}" data-val="${m.premium==='true'?'false':'true'}" title="Premium puts the task at the front of the queue">${m.premium==='true'?'Premium: on':'Premium: off'}</button>`;
@@ -107,13 +107,13 @@ function actionsHtml(i){const m=i.meta||{};let h='';
     if(!i.locked){const armed=lintArmed.has(i.id);
       h+=`<button class="primary" data-file="${esc(i.id)}" title="Queue this item as an Agent Manager task">${armed?'File anyway':'File'}</button>`;
       if(i.lint&&i.lint.length)h+=`<br><small class="warn">Polling language: ${esc(i.lint.join(', '))}. Reword it to use a trigger${armed?', or press File anyway':''}.</small>`}
-    else h+=`<br><small>task ${esc(m.task||'')}</small>`}
+    else h+=`<br><small>task ${esc(m.task||'')}${taskStates[i.id]?' · '+esc(taskStates[i.id].state):''}</small>`}
   return h+`<button data-grill="${esc(i.id)}" title="Interview me about just this item">Grill</button>`}
 function checklistHtml(items){
   if(!items.length)return '<p><small>No checklist items yet.</small></p>';
   return items.map(i=>{const m=i.meta||{};
     return `<div class="row ${i.ticked?'done':''}" data-item="${esc(i.id)}"><input type="checkbox" disabled ${i.ticked?'checked':''}><span class="id">${esc(i.id)}</span>
-    <span class="ti">${esc(i.title)}${m.premium==='true'?'<span class="tag">premium</span>':''}${m.cloud==='true'?'<span class="tag">cloud</span>':''}${i.locked?'<span class="tag lock">filed</span>':''}${m.changed?`<span class="tag">changed since filing ${esc(m.changed)}</span>`:''}${m.manual==='true'?'<span class="tag">ticked by hand</span>':''}
+    <span class="ti">${esc(i.title)}${m.premium==='true'?'<span class="tag">premium</span>':''}${m.cloud==='true'?'<span class="tag">cloud</span>':''}${i.locked?'<span class="tag lock">filed</span>':''}${m.took?`<span class="tag">took ${esc(m.took)} min</span>`:''}${m.changed?`<span class="tag">changed since filing ${esc(m.changed)}</span>`:''}${m.manual==='true'?'<span class="tag">ticked by hand</span>':''}
     ${(i.deps||[]).length?`<br><small>after ${esc(i.deps.join(', '))}</small>`:''}${i.body?`<br><small>${esc(i.body)}</small>`:''}</span>
     <span class="acts">${actionsHtml(i)}</span></div>`}).join('');
 }
@@ -127,7 +127,9 @@ async function openFile(path){
   if(!cur||!path)return;curPath=path;clearMain();
   $('path').textContent=`${cur}/${path}`;$('bView').className='on';$('bEdit').className='';$('bSave').style.display='none';
   document.querySelectorAll('#tree .f').forEach(e=>e.classList.toggle('on',e.dataset.p===path));
-  if(path==='checklist.md'){$('view').innerHTML=checklistHtml(await api(`/api/features/${cur}/checklist`));return}
+  if(path==='checklist.md'){
+    try{const r=await post(`/api/features/${cur}/sync`,{});taskStates=r.states||{};if(r.ticked&&r.ticked.length){toast('Merged: '+r.ticked.join(', '));loadLibrary().catch(()=>{})}}catch(e){taskStates={}}
+    $('view').innerHTML=checklistHtml(await api(`/api/features/${cur}/checklist`));return}
   const r=await api(`/api/features/${cur}/render?path=${encodeURIComponent(path)}`);$('view').innerHTML=r.html;
 }
 async function startEdit(){
