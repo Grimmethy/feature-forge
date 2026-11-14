@@ -124,6 +124,9 @@ class ChecklistRouteTests(unittest.TestCase):
         self.assertEqual((items["FF-2"]["meta"]["manual"], items["FF-2"]["meta"]["merged"]), ("true", "de08292"))
         self.assertTrue(items["FF-3"]["ticked"] and items["FF-3"]["meta"]["merged"] == "152ddcf")
         self.assertFalse(items["FF-4"]["ticked"])
+        self.assertTrue(items["FF-5"]["ticked"] and items["FF-6"]["ticked"])
+        self.assertEqual((items["FF-5"]["meta"]["merged"], items["FF-6"]["meta"]["merged"]), ("4c23ac9", "e9f3f6b"))
+        self.assertFalse(items["FF-7"]["ticked"])
 
 
 if __name__ == "__main__":
