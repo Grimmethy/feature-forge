@@ -66,6 +66,25 @@ class ChecklistRouteTests(unittest.TestCase):
         self.assertEqual((rows["FF-2"]["deps"], rows["FF-2"]["body"]), (["FF-1"], "Body of build."))
         self.assertEqual(rows["FF-3"]["meta"]["deps"], "FF-2")
 
+    def test_rows_carry_pieces_with_counts_and_a_body_without_them(self):
+        store.write_file(self.slug, "checklist.md", "# Checklist: Thing\n\n- [ ] FF-1 Parent <!-- deps: -->\n  Plain line.\n"
+                         "  - [x] 1a One <!-- merged: abc1234 -->\n  - [ ] 1b Two\n- [ ] FF-2 Lonely <!-- deps: -->\n", self.root)
+        rows = {r["id"]: r for r in self.client.get(self.url("")).get_json()}
+        self.assertEqual(rows["FF-1"]["body"], "Plain line.")
+        self.assertEqual((rows["FF-1"]["pieceDone"], rows["FF-1"]["pieceTotal"]), (1, 2))
+        self.assertEqual(rows["FF-1"]["pieces"][0], {"ticked": True, "id": "1a", "title": "One", "meta": {"merged": "abc1234"}})
+        self.assertEqual((rows["FF-2"]["pieces"], rows["FF-2"]["pieceDone"], rows["FF-2"]["pieceTotal"]), ([], 0, 0))
+
+    def test_the_real_checklist_lists_every_sub_piece_with_its_merge_commit(self):
+        items = {i["id"]: i for i in checklist.items(checklist.parse(
+            (repo_root / "features" / "feature-forge" / "checklist.md").read_text(encoding="utf-8")))}
+        counts = {k: (sum(p["ticked"] for p in checklist.pieces(v)), len(checklist.pieces(v))) for k, v in items.items()}
+        self.assertEqual(counts, {"FF-1": (1, 1), "FF-2": (4, 4), "FF-3": (4, 4), "FF-4": (2, 3), "FF-5": (1, 1), "FF-6": (2, 2), "FF-7": (3, 4)})
+        for item in items.values():
+            for p in checklist.pieces(item):
+                self.assertEqual(p["ticked"], "merged" in p["meta"], p["title"])      # a ticked piece names its merge commit, an open one does not
+        self.assertIn("owner decision", checklist.pieces(items["FF-4"])[2]["meta"]["needs"])
+
     def test_unknown_feature_is_404(self):
         self.assertEqual(self.client.get("/api/features/nope/checklist").status_code, 404)
         self.assertEqual(self.client.post("/api/features/nope/checklist/preview", json={"proposal": {"ops": [{"op": "add", "title": "x"}]}}).status_code, 404)

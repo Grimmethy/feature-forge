@@ -1,9 +1,28 @@
 # Checklist: Feature Forge
 
 - [x] FF-1 Scaffold, store, library (flat list, search, Done filter) <!-- task: adhoc-ff-1-scaffold-feature-forge-store-http-api-library-ui-flat-list-search-done-filter-1794618302099 premium: true cloud: false deps: filed: 2026-11-13 manual: true merged: ec1b3da -->
+  - [x] 1 Store, HTTP API, library UI, search and Done filter, tests (six pieces) <!-- merged: ec1b3da -->
 - [x] FF-2 Grill panel, repo intake question, read-only tools (+ chat-plugin allowlist) <!-- deps: FF-1 manual: true merged: de08292 -->
+  - [x] 2a Chat plugin: read-only sessions (chat plugin repo) <!-- merged: 2dd7866 -->
+  - [x] 2b1 Grill core: seed, read-only sessions, streaming, saving <!-- merged: 3acae0e -->
+  - [x] 2b2 Routes for repo intake and grill sessions <!-- merged: 584f69e -->
+  - [x] 2b3 Page: repo chooser and read-only grill panel <!-- merged: de08292 -->
 - [x] FF-3 Checklist format, diff proposals, item grills with splitting <!-- deps: FF-2 manual: true merged: 152ddcf -->
+  - [x] 3a Checklist diffs: apply a proposed change safely <!-- merged: 92d96f3 -->
+  - [x] 3b1 Item grills and checklist-diff proposals in the grill core <!-- merged: ee78755 -->
+  - [x] 3b2 Checklist and proposal routes <!-- merged: 27fb0d3 -->
+  - [x] 3c Checklist rows with item Grill buttons and proposal review <!-- merged: 152ddcf -->
 - [ ] FF-4 Filing, polling lint, premium and cloud toggles, Sonnet lane entry <!-- deps: FF-3 -->
+  - [x] 4a Filing core: polling lint, standard trigger clause, file an item <!-- merged: f02d0e5 -->
+  - [x] 4b Filing routes and the File, Premium and Cloud buttons <!-- merged: 762078b -->
+  - [ ] 4c Dedicated Sonnet cloud lane: second gateway, lane entry, class routing <!-- needs: owner decision -->
 - [x] FF-5 Status sync (auto-tick) and timing data <!-- deps: FF-4 manual: true merged: 4c23ac9 -->
+  - [x] 5a Status sync: tick merged items, task states, timing log <!-- merged: 4c23ac9 -->
 - [x] FF-6 Board, Graph, By-repo views <!-- deps: FF-5 manual: true merged: e9f3f6b -->
+  - [x] 6a Board, by-repo roll-up and dependency graph, with routes <!-- merged: 75794e9 -->
+  - [x] 6b Board, By repo and Graph in the page <!-- merged: e9f3f6b -->
 - [ ] FF-7 Manager loop (15 min dry run) and repo-creation button <!-- deps: FF-5 -->
+  - [x] 7a Repo creation: plan and confirm-gated create routes <!-- merged: 1e23825 -->
+  - [x] 7b Create repo button: show the steps, then Create now <!-- merged: 9dccb54 -->
+  - [x] 7c Manager decisions: closed outcomes, ledger, dry-run default <!-- merged: 0dde61e -->
+  - [ ] 7d Manager worker wiring: trigger, drain, Workers card, plugins.json, 15 minute dry run <!-- needs: owner decision on its home -->
