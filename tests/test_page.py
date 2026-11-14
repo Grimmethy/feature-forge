@@ -62,6 +62,17 @@ class PageTests(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, SCRIPT)
 
+    def test_the_create_repo_button_shows_the_steps_before_doing_anything(self):
+        for needle in ("/api/repos/plan?name=", "/api/repos/create", "confirm:true", "Create now", "rcplan", "rcgo", "repoCreateBox", "does not exist yet"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, SCRIPT)
+        self.assertLess(SCRIPT.index("/api/repos/plan?name="), SCRIPT.index("/api/repos/create"))
+
+    def test_create_now_cannot_be_pressed_twice_and_done_steps_are_marked(self):
+        self.assertIn("$('rcgo').disabled=true", SCRIPT)                 # disabled while the request runs
+        self.assertIn("$('rcgo').disabled=false", SCRIPT)                # and usable again after an error
+        self.assertIn("(already done)", SCRIPT)
+
     def test_a_refused_op_cannot_be_ticked(self):
         self.assertIn("r.ok?'checked':'disabled'", SCRIPT)
 

@@ -204,8 +204,19 @@ async function repoChooser(){
     <label>Existing repo<select id="rsel"><option value="">(none)</option>${repos.map(r=>`<option value="${esc(r.name)}"${r.name===now.name?' selected':''}>${esc(r.name)}${r.summary?' - '+esc(r.summary):''}</option>`).join('')}</select></label>
     <label>or a new repo name<input id="rnew" placeholder="e.g. my-new-tool"></label>
     <div><button class="primary" type="submit">Use this repo</button></div></form>`;
+  if(now.name&&!now.exists)repoCreateBox(now.name);
   $('rf').onsubmit=async ev=>{ev.preventDefault();const name=$('rnew').value.trim()||$('rsel').value;if(!name){toast('Pick a repo or type a new name');return}
     try{await post(`/api/features/${cur}/repo`,{name});toast('Repo set: '+name);await refreshRepo();await openFile('request.md')}catch(e){toast(e.message)}}}
+/* Create repo: the first press shows the steps, the second press (Create now) does them. No dialog. */
+function repoCreateBox(name){
+  $('view').insertAdjacentHTML('beforeend',`<div id="rcreate"><h3>${esc(name)} does not exist yet</h3><button id="rcplan" class="primary">Create repo</button><div id="rcsteps"></div></div>`);
+  $('rcplan').onclick=async()=>{try{
+    const p=await api(`/api/repos/plan?name=${encodeURIComponent(name)}`);
+    $('rcsteps').innerHTML='<p><small>These steps will run, in this order:</small></p><ol>'+p.steps.map(s=>`<li class="rstep" data-step="${esc(s.id)}">${esc(s.text)}${s.done?' <small>(already done)</small>':''}</li>`).join('')+'</ol><button id="rcgo" class="primary">Create now</button>';
+    $('rcgo').onclick=async()=>{$('rcgo').disabled=true;try{
+      const r=await post('/api/repos/create',{name,confirm:true});
+      $('rcsteps').innerHTML='<ol>'+r.steps.map(s=>`<li class="rstep" data-step="${esc(s.id)}">${esc(s.text)} <b>${esc(s.result)}</b></li>`).join('')+'</ol>';
+      toast('Repo created: '+name);await refreshRepo()}catch(e){toast(e.message);$('rcgo').disabled=false}}}catch(e){toast(e.message)}}}
 $('bRepo').onclick=()=>repoChooser().catch(e=>toast(e.message));
 
 /* ---- grill panel ---- */
