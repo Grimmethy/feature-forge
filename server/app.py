@@ -2,7 +2,8 @@
 
 Routes: GET / (the single-page UI), GET /api/health, GET|POST /api/features, GET /api/features/<slug>/tree,
 GET|PUT /api/features/<slug>/file?path=, GET /api/features/<slug>/render?path=, GET /api/search?q=,
-GET /api/repos, GET|POST /api/features/<slug>/repo, and the grill routes: POST /api/grill/start,
+GET /api/repos, GET|POST /api/features/<slug>/repo, GET /api/features/<slug>/checklist, POST .../checklist/preview|apply,
+POST /api/grill/<slug>/<sid>/proposal, and the grill routes: POST /api/grill/start,
 GET /api/grill/<slug>/sessions, POST /api/grill/<slug>/<sid>/begin|message (server-sent events), /save and /end.
 No timers and no polling: every response is computed when asked.
 """
@@ -18,7 +19,7 @@ import markdown as md
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from server.core import grill, store  # noqa: E402
+from server.core import checklist, grill, store  # noqa: E402
 
 HREF_RE = re.compile(r'href="(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+\.md)"', re.I)
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -66,6 +67,10 @@ def create_app(root: Path | None = None) -> Flask:
     @app.errorhandler(store.StoreError)
     def store_error(e: store.StoreError):
         return jsonify({"error": str(e)}), (404 if str(e).startswith("no such") else 400)
+
+    @app.errorhandler(checklist.ChecklistError)
+    def checklist_error(e: checklist.ChecklistError):
+        return jsonify({"error": str(e)}), 400
 
     @app.errorhandler(grill.GrillError)
     def grill_error(e: grill.GrillError):
@@ -135,6 +140,31 @@ def create_app(root: Path | None = None) -> Flask:
                     if len(hits) >= SEARCH_CAP:
                         return jsonify(hits)
         return jsonify(hits)
+
+    @app.get("/api/features/<slug>/checklist")
+    def get_checklist(slug):
+        entries = checklist.parse(store.read_file(slug, "checklist.md", froot()))
+        return jsonify([{"id": i["id"], "title": i["title"], "ticked": i["ticked"], "locked": checklist.is_locked(i),
+                         "deps": checklist._deps(i), "body": "\n".join(i["body"]), "meta": i["meta"]}
+                        for i in checklist.items(entries)])
+
+    @app.post("/api/features/<slug>/checklist/preview")
+    def checklist_preview(slug):
+        proposal = (request.get_json(silent=True) or {}).get("proposal")
+        return jsonify({"results": checklist.preview(slug, proposal, froot())})
+
+    @app.post("/api/features/<slug>/checklist/apply")
+    def checklist_apply(slug):
+        body = request.get_json(silent=True) or {}
+        only = body.get("only")
+        if only is not None and not (isinstance(only, list) and all(isinstance(n, int) and not isinstance(n, bool) for n in only)):
+            return jsonify({"error": "only must be a list of operation numbers"}), 400
+        return jsonify(checklist.apply(slug, body.get("proposal"), only, froot()))
+
+    @app.post("/api/grill/<slug>/<sid>/proposal")
+    def grill_proposal(slug, sid):
+        proposal = grill.proposal_from_session(slug, sid, froot())
+        return jsonify({"proposal": proposal, "preview": checklist.preview(slug, proposal, froot())})
 
     @app.get("/api/repos")
     def repos():

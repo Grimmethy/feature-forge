@@ -246,7 +246,7 @@ def _copy(entries: list[dict]) -> list[dict]:
 
 
 def preview(slug: str, proposal: dict, root: Path | None = None) -> list[dict]:
-    ops = (proposal or {}).get("ops")
+    ops = proposal.get("ops") if isinstance(proposal, dict) else None
     if not isinstance(ops, list) or not ops:
         raise ChecklistError("the proposal has no ops")
     entries = parse(store.read_file(slug, "checklist.md", root))
@@ -254,7 +254,7 @@ def preview(slug: str, proposal: dict, root: Path | None = None) -> list[dict]:
 
 
 def apply(slug: str, proposal: dict, only: list[int] | None = None, root: Path | None = None) -> dict:
-    ops = (proposal or {}).get("ops")
+    ops = proposal.get("ops") if isinstance(proposal, dict) else None
     if not isinstance(ops, list) or not ops:
         raise ChecklistError("the proposal has no ops")
     selected = set(only) if only is not None else None
