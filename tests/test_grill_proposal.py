@@ -130,7 +130,7 @@ class ProposalTests(Base):
 
     def test_the_protocol_documents_the_block_and_the_rules(self):
         text = grill.PROTOCOL_PATH.read_text(encoding="utf-8")
-        for needle in ("```checklist-diff", '"op": "split"', "smaller tasks", "instead of a timer", "Filed items"):
+        for needle in ("```checklist-diff", '"op": "split"', "smaller tasks", "instead of a timer", "Filed items", '"pieces"', "the TASKS are its `pieces`", "appends new pieces"):
             with self.subTest(needle=needle):
                 self.assertIn(needle, text)
 

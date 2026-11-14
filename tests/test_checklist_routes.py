@@ -72,7 +72,7 @@ class ChecklistRouteTests(unittest.TestCase):
         rows = {r["id"]: r for r in self.client.get(self.url("")).get_json()}
         self.assertEqual(rows["FF-1"]["body"], "Plain line.")
         self.assertEqual((rows["FF-1"]["pieceDone"], rows["FF-1"]["pieceTotal"]), (1, 2))
-        self.assertEqual(rows["FF-1"]["pieces"][0], {"ticked": True, "id": "1a", "title": "One", "meta": {"merged": "abc1234"}})
+        self.assertEqual(rows["FF-1"]["pieces"][0], {"ticked": True, "id": "1a", "title": "One", "meta": {"merged": "abc1234"}, "body": ""})
         self.assertEqual((rows["FF-2"]["pieces"], rows["FF-2"]["pieceDone"], rows["FF-2"]["pieceTotal"]), ([], 0, 0))
 
     def test_the_real_checklist_lists_every_sub_piece_with_its_merge_commit(self):

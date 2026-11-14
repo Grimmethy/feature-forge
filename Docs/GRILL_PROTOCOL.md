@@ -26,14 +26,16 @@ When the owner has confirmed the plan, end your reply with ONE fenced block tagg
 
 ```checklist-diff
 {"ops": [
-  {"op": "add", "title": "...", "body": "full self-contained task text, files, acceptance", "deps": ["FF-2"]},
-  {"op": "change", "id": "FF-3", "title": "...", "body": "..."},
+  {"op": "add", "title": "...", "body": "what this step is for, in a few lines", "deps": ["FF-2"],
+   "pieces": [{"title": "first task", "body": "full self-contained task text, files, acceptance"}, {"title": "second task", "body": "..."}]},
+  {"op": "change", "id": "FF-3", "title": "...", "body": "...", "pieces": [{"title": "one more task", "body": "..."}]},
   {"op": "split", "id": "FF-4", "into": [{"title": "...", "body": "..."}, {"title": "...", "body": "..."}]},
   {"op": "remove", "id": "FF-5"}
 ]}
 ```
 
 Rules for the block:
+- A step is a heading for the owner; the TASKS are its `pieces`. Any step that needs more than one task gets `pieces`, one per task, in the order they will be built (labelled 4a, 4b... for you). Each piece's `body` is the full task text a worker will see: it must stand alone. A step that is a single task may have no pieces and put its task text in `body`. `change` with `pieces` appends new pieces; it never touches existing ones.
 - Prefer more, smaller tasks. Each task text must stand alone: a worker sees only its own repo, so name the files, the tests and the acceptance check in the body.
 - Filed items (their line has a task or filed key) can only be reworded with `change`; never split or remove them.
 - Every dependency must be an existing item; no cycles. A split's parts chain one after another unless you give `deps`.
