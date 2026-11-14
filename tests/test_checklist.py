@@ -212,6 +212,12 @@ class UpdatePieceTests(unittest.TestCase):
         ok, item, text = self.run_update("1a", meta={"task": "t-1"})
         self.assertEqual(text.replace(" <!-- task: t-1 -->", ""), self.TEXT)
 
+    def test_drop_removes_keys_and_keeps_the_rest(self):
+        ok, item, text = self.run_update("1b", drop=("merged",))
+        self.assertIn("  - [x] 1b Two\n", text)
+        ok, item, text = self.run_update("1b", meta={"took": "7"}, drop=("merged",))
+        self.assertIn("  - [x] 1b Two <!-- took: 7 -->", text)
+
     def test_an_unknown_piece_changes_nothing(self):
         ok, item, text = self.run_update("1z", meta={"task": "t"})
         self.assertFalse(ok)
