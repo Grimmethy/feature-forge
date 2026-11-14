@@ -49,6 +49,9 @@ form.nf textarea{min-height:180px}
 #gtext{width:100%;min-height:72px;resize:vertical;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit}
 #gin .row2{display:flex;gap:6px;flex-wrap:wrap}
 .repo-opt{padding:6px 0;border-bottom:1px solid var(--line)}.repo-opt small{color:var(--muted);display:block}
+#prop{border-top:1px solid var(--line);padding:8px;display:none;max-height:40%;overflow:auto;font-size:13px}
+.pop{padding:4px 0;border-bottom:1px solid var(--line)}.pop.bad{color:var(--muted)}
+.row .acts{margin-left:auto}.tag.lock{color:var(--accent);border-color:var(--accent)}
 form.rf{display:flex;flex-direction:column;gap:8px;max-width:620px}
 form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px;font:inherit}
 </style></head><body>
@@ -68,7 +71,8 @@ form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px s
   <div id="gt"></div>
   <div style="padding:8px"><button id="gstart" class="primary">Start the interview</button></div>
   <div id="gin"><textarea id="gtext" placeholder="Your answers (Ctrl+Enter sends)"></textarea>
-    <div class="row2"><button id="gsend" class="primary">Send</button><button id="gsave" title="Append this conversation to interview.md">Save to interview</button><button id="gend" title="End the session (press twice if it is unsaved)">End</button></div></div>
+    <div class="row2"><button id="gsend" class="primary">Send</button><button id="gsave" title="Append this conversation to interview.md">Save to interview</button><button id="grev" title="Read the newest checklist proposal in this conversation">Review proposal</button><button id="gend" title="End the session (press twice if it is unsaved)">End</button></div></div>
+  <div id="prop"></div>
 </div>
 <div id="toast"></div>
 <script>
@@ -95,16 +99,13 @@ async function loadLibrary(){features=await api('/api/features');renderFilters()
 
 function clearMain(){$('view').style.display='block';$('edit').style.display='none';editing=false}
 function showButtons(on){['bRepo','bGrill','bView','bEdit'].forEach(b=>$(b).style.display=on?'':'none');$('bSave').style.display='none'}
-function parseChecklist(text){
-  return text.split('\n').map(l=>l.match(/^- \[( |x|X)\] (FF-\d+) (.*?)\s*(?:<!--(.*?)-->)?\s*$/)).filter(Boolean).map(m=>{
-    const meta={};let k=null;(m[4]||'').split(/\s+/).filter(Boolean).forEach(t=>{if(t.endsWith(':')){k=t.slice(0,-1);meta[k]=''}else if(k)meta[k]=(meta[k]+' '+t).trim()});
-    return {ticked:m[1]!==' ',id:m[2],title:m[3],meta}});
-}
-function checklistHtml(text){
-  const items=parseChecklist(text);if(!items.length)return '<p><small>No checklist items yet.</small></p>';
-  return items.map(i=>`<div class="row ${i.ticked?'done':''}"><input type="checkbox" disabled ${i.ticked?'checked':''}><span class="id">${esc(i.id)}</span>
-    <span class="ti">${esc(i.title)}${i.meta.premium==='true'?'<span class="tag">premium</span>':''}${i.meta.cloud==='true'?'<span class="tag">cloud</span>':''}
-    ${i.meta.deps?`<br><small>after ${esc(i.meta.deps)}</small>`:''}</span></div>`).join('');
+function checklistHtml(items){
+  if(!items.length)return '<p><small>No checklist items yet.</small></p>';
+  return items.map(i=>{const m=i.meta||{};
+    return `<div class="row ${i.ticked?'done':''}" data-item="${esc(i.id)}"><input type="checkbox" disabled ${i.ticked?'checked':''}><span class="id">${esc(i.id)}</span>
+    <span class="ti">${esc(i.title)}${m.premium==='true'?'<span class="tag">premium</span>':''}${m.cloud==='true'?'<span class="tag">cloud</span>':''}${i.locked?'<span class="tag lock">filed</span>':''}${m.changed?`<span class="tag">changed since filing ${esc(m.changed)}</span>`:''}${m.manual==='true'?'<span class="tag">ticked by hand</span>':''}
+    ${(i.deps||[]).length?`<br><small>after ${esc(i.deps.join(', '))}</small>`:''}${i.body?`<br><small>${esc(i.body)}</small>`:''}</span>
+    <span class="acts"><button data-grill="${esc(i.id)}" title="Interview me about just this item">Grill</button></span></div>`}).join('');
 }
 async function openFeature(slug,path){
   cur=slug;renderList();clearMain();showButtons(true);$('tree').style.display='block';refreshRepo().catch(()=>{});
@@ -116,7 +117,7 @@ async function openFile(path){
   if(!cur||!path)return;curPath=path;clearMain();
   $('path').textContent=`${cur}/${path}`;$('bView').className='on';$('bEdit').className='';$('bSave').style.display='none';
   document.querySelectorAll('#tree .f').forEach(e=>e.classList.toggle('on',e.dataset.p===path));
-  if(path==='checklist.md'){const f=await api(`/api/features/${cur}/file?path=${encodeURIComponent(path)}`);$('view').innerHTML=checklistHtml(f.text);return}
+  if(path==='checklist.md'){$('view').innerHTML=checklistHtml(await api(`/api/features/${cur}/checklist`));return}
   const r=await api(`/api/features/${cur}/render?path=${encodeURIComponent(path)}`);$('view').innerHTML=r.html;
 }
 async function startEdit(){
@@ -142,6 +143,7 @@ async function runSearch(){
   $('view').innerHTML=hits.length?hits.map(h=>`<div class="hit" data-s="${esc(h.slug)}" data-p="${esc(h.path)}"><b>${esc(h.slug)}/${esc(h.path)}</b><small>${esc(h.snippet)}</small></div>`).join(''):'<p><small>No matches.</small></p>';
 }
 document.addEventListener('click',async ev=>{
+  const gb=ev.target.closest('[data-grill]');if(gb){itemGrill(gb.dataset.grill);return}
   const t=ev.target.closest('[data-f],[data-s],[data-p],a[data-md]');if(!t)return;
   try{
     if(t.dataset.f){filter=t.dataset.f;renderFilters();renderList()}
@@ -170,13 +172,17 @@ async function repoChooser(){
 $('bRepo').onclick=()=>repoChooser().catch(e=>toast(e.message));
 
 /* ---- grill panel ---- */
-let G=null,gUnsaved=false,gEnding=false;
+let G=null,gUnsaved=false,gEnding=false,gNode='feature';
 function gadd(cls,text){const d=document.createElement('div');d.className='gm '+cls;d.textContent=text;$('gt').appendChild(d);$('gt').scrollTop=1e9;return d}
-function gReset(){G=null;gUnsaved=false;gEnding=false;$('gt').innerHTML='';$('gin').style.display='none';$('gstart').parentElement.style.display=''}
+function gReset(){$('prop').style.display='none';$('prop').innerHTML='';G=null;gUnsaved=false;gEnding=false;$('gt').innerHTML='';$('gin').style.display='none';$('gstart').parentElement.style.display=''}
+function itemGrill(id){
+  if(!cur)return;if(G&&(G.slug!==cur||G.node!==id)){gToast();return}
+  gNode=id;openGrill()}
+function gToast(){toast('End the current grill session first (Save to interview, then End)')}
 function openGrill(){
   if(!cur){toast('Open a feature first');return}
   if(G&&G.slug!==cur)gReset();
-  $('grill').style.display='flex';$('gtitle').textContent=`Grill: ${cur}`;
+  $('grill').style.display='flex';$('gtitle').textContent=`Grill: ${cur}${gNode!=='feature'?' / '+gNode:''}`;
   if(!G&&!$('gt').children.length)gadd('sys','Starts an interview about this feature. The model can read the repos but cannot change anything. Nothing is saved until you press "Save to interview".')}
 async function gstream(url,body){
   const bub=gadd('','');$('gsend').disabled=true;
@@ -192,11 +198,11 @@ async function gstream(url,body){
     if(!bub.textContent)bub.textContent='(no reply)';gUnsaved=true;
   }catch(e){bub.className='gm sys';bub.textContent='Error: '+e.message}
   $('gsend').disabled=false}
-$('bGrill').onclick=()=>openGrill();
+$('bGrill').onclick=()=>{if(!G)gNode='feature';openGrill()};
 $('gclose').onclick=()=>{$('grill').style.display='none'};
 $('gstart').onclick=async()=>{
-  try{$('gstart').disabled=true;const m=await post('/api/grill/start',{feature:cur});
-    G={sid:m.id,slug:cur};$('gstart').parentElement.style.display='none';$('gin').style.display='flex';
+  try{$('gstart').disabled=true;const m=await post('/api/grill/start',{feature:cur,node:gNode});
+    G={sid:m.id,slug:cur,node:gNode};$('gstart').parentElement.style.display='none';$('gin').style.display='flex';
     gadd('sys','Session started. Waiting for the first round...');await gstream(`/api/grill/${G.slug}/${G.sid}/begin`);
   }catch(e){gadd('sys','Could not start: '+e.message)}finally{$('gstart').disabled=false}};
 $('gsend').onclick=async()=>{const t=$('gtext').value.trim();if(!t||!G)return;$('gtext').value='';gadd('me',t);await gstream(`/api/grill/${G.slug}/${G.sid}/message`,{message:t})};
@@ -206,6 +212,22 @@ $('gsave').onclick=async()=>{if(!G)return;
   catch(e){gadd('sys','Save failed: '+e.message)}};
 $('gend').onclick=async()=>{if(!G)return;
   if(gUnsaved&&!gEnding){gEnding=true;gadd('sys','Not saved yet. Press End again to discard, or Save to interview first.');return}
-  await post(`/api/grill/${G.slug}/${G.sid}/end`,{}).catch(()=>{});gReset();gadd('sys','Session ended.')};
+  await post(`/api/grill/${G.slug}/${G.sid}/end`,{}).catch(()=>{});gReset();gNode='feature';gadd('sys','Session ended.')};
+/* ---- proposal review: the model proposes checklist changes, the owner ticks which to apply ---- */
+let PROP=null;
+function showProp(){
+  const box=$('prop');box.style.display='block';
+  box.innerHTML='<b>Proposed checklist changes</b>'+PROP.proposal.ops.map((op,n)=>{const r=PROP.preview[n]||{};
+    return `<label class="pop ${r.ok?'':'bad'}" data-op="${n}"><input type="checkbox" ${r.ok?'checked':'disabled'}> ${esc(r.summary||op.op)}${r.ok?'':' (refused)'}</label>`}).join('')
+    +'<div class="row2" style="margin-top:6px"><button id="gapply" class="primary">Apply selected</button></div>';
+  $('gapply').onclick=applyProp}
+async function applyProp(){
+  const only=[...document.querySelectorAll('#prop .pop')].filter(l=>l.querySelector('input').checked).map(l=>+l.dataset.op);
+  if(!only.length){toast('Nothing selected');return}
+  try{await post(`/api/features/${G.slug}/checklist/apply`,{proposal:PROP.proposal,only});PROP=null;$('prop').style.display='none';
+    gadd('sys','Checklist updated.');await loadLibrary();if(cur===G.slug)await openFeature(cur,'checklist.md')}
+  catch(e){gadd('sys','Apply failed: '+e.message)}}
+$('grev').onclick=async()=>{if(!G)return;
+  try{PROP=await post(`/api/grill/${G.slug}/${G.sid}/proposal`,{});showProp()}catch(e){gadd('sys',e.message)}};
 loadLibrary().catch(e=>toast(e.message));
 </script></body></html>

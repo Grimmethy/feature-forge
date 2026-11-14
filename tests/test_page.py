@@ -37,6 +37,16 @@ class PageTests(unittest.TestCase):
     def test_the_owner_decides_the_repo_wording(self):
         self.assertIn("The decision is yours", SCRIPT)
 
+    def test_the_checklist_rows_and_proposal_review_are_wired(self):
+        for ident in ("grev", "prop"):
+            self.assertIn(f'id="{ident}"', PAGE)
+        for needle in ("/api/features/${cur}/checklist", "data-grill", "node:gNode", "/proposal", "/checklist/apply", "only", "changed since filing"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, SCRIPT)
+
+    def test_a_refused_op_cannot_be_ticked(self):
+        self.assertIn("r.ok?'checked':'disabled'", SCRIPT)
+
     def test_buttons_are_hidden_outside_a_feature(self):
         self.assertRegex(SCRIPT, r"function showButtons\(on\)\{\['bRepo','bGrill'")
 
