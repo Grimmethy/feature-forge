@@ -52,7 +52,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('3a adhoc-fake-3, 3b adhoc-fake-4'), null, { timeout: 10000 });
   ok(true, 'filing a step with pieces files one task per piece and the toast lists them');
   await page.waitForFunction(() => document.querySelector('.row[data-item="FF-3"] .piece[data-piece="3b"]').textContent.includes('task adhoc-fake-4'));
-  ok((await txt('.row[data-item="FF-3"] .piece[data-piece="3a"]')).includes('task adhoc-fake-3'), 'each piece shows its own task id');
+  ok((await txt('.row[data-item="FF-3"] .piece[data-piece="3a"]')).includes('task adhoc-fake-3 · review'), 'each piece shows its own task id and the state the sync read from the queue');
   ok(!(await page.$('.row[data-item="FF-3"] [data-file]')), 'once every piece is filed there is no File button');
   // premium on a filed row
   await page.click('.row[data-item="FF-1"] [data-flag="premium"]');
