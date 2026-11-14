@@ -109,15 +109,15 @@ function showButtons(on){['bRepo','bGrill','bGraph','bView','bEdit'].forEach(b=>
 let lintArmed=new Set(),taskStates={};
 function piecesHtml(i){if(!(i.pieces||[]).length)return '';
   return '<ul class="pieces">'+i.pieces.map(p=>{const m=p.meta||{};
-    return `<li class="piece ${p.ticked?'done':''}" data-piece="${esc(p.id)}"><input type="checkbox" disabled ${p.ticked?'checked':''}><b>${esc(p.id)}</b><span class="pt">${esc(p.title)}</span>${m.merged?`<span class="tag merged">merged ${esc(m.merged)}</span>`:''}${m.needs?`<span class="tag need">needs: ${esc(m.needs)}</span>`:''}</li>`}).join('')+'</ul>'}
+    return `<li class="piece ${p.ticked?'done':''}" data-piece="${esc(p.id)}"><input type="checkbox" disabled ${p.ticked?'checked':''}><b>${esc(p.id)}</b><span class="pt">${esc(p.title)}</span>${m.merged?`<span class="tag merged">merged ${esc(m.merged)}</span>`:''}${m.task?`<span class="tag" title="The Agent Manager task for this piece">task ${esc(m.task)}${(taskStates[i.id+'/'+p.id]||{}).state?' · '+esc(taskStates[i.id+'/'+p.id].state):''}</span>`:''}${m.needs?`<span class="tag need">needs: ${esc(m.needs)}</span>`:''}</li>`}).join('')+'</ul>'}
 function actionsHtml(i){const m=i.meta||{};let h='';
   if(!i.ticked){
     h+=`<button data-flag="premium" data-id="${esc(i.id)}" data-val="${m.premium==='true'?'false':'true'}" title="Premium puts the task at the front of the queue">${m.premium==='true'?'Premium: on':'Premium: off'}</button>`;
     if(!i.locked)h+=`<button data-flag="cloud" data-id="${esc(i.id)}" data-val="${m.cloud==='true'?'false':'true'}" title="Cloud sends the task to the Sonnet cloud lane">${m.cloud==='true'?'Cloud: on':'Cloud: off'}</button>`;
-    if(!i.locked){const armed=lintArmed.has(i.id);
-      h+=`<button class="primary" data-file="${esc(i.id)}" title="Queue this item as an Agent Manager task">${armed?'File anyway':'File'}</button>`;
+    if(!i.locked||i.pieceUnfiled>0){const armed=lintArmed.has(i.id);
+      h+=`<button class="primary" data-file="${esc(i.id)}" title="${i.pieceTotal?'Queue each unfiled piece as its own Agent Manager task, in order':'Queue this item as an Agent Manager task'}">${armed?'File anyway':'File'}</button>`;
       if(i.lint&&i.lint.length)h+=`<br><small class="warn">Polling language: ${esc(i.lint.join(', '))}. Reword it to use a trigger${armed?', or press File anyway':''}.</small>`}
-    else h+=`<br><small>task ${esc(m.task||'')}${taskStates[i.id]?' · '+esc(taskStates[i.id].state):''}</small>`}
+    else if(m.task)h+=`<br><small>task ${esc(m.task)}${taskStates[i.id]?' · '+esc(taskStates[i.id].state):''}</small>`}
   return h+`<button data-grill="${esc(i.id)}" title="Interview me about just this item">Grill</button>`}
 function checklistHtml(items){
   if(!items.length)return '<p><small>No checklist items yet.</small></p>';
@@ -172,7 +172,8 @@ document.addEventListener('click',async ev=>{
     else{const id=fb.dataset.file,row=(await api(`/api/features/${cur}/checklist`)).find(r=>r.id===id);
       if(row&&row.lint.length&&!lintArmed.has(id)){lintArmed.add(id);await openFile('checklist.md');return}
       const r=await post(`/api/features/${cur}/checklist/${id}/file`,{acceptLint:lintArmed.has(id)});lintArmed.delete(id);
-      toast(`Filed ${id} as ${r.task}${r.premiumError?' (premium not set: '+r.premiumError+')':''}`);await loadLibrary()}
+      const made=(r.pieces&&r.pieces.length)?r.pieces.map(x=>x.piece+' '+x.task).join(', '):r.task;const pe=r.premiumError||(r.pieces||[]).map(x=>x.premiumError).find(Boolean);
+      toast(`Filed ${id} as ${made}${pe?' (premium not set: '+pe+')':''}`);await loadLibrary()}
     await openFile('checklist.md')}catch(e){toast(e.message)}return}
   const t=ev.target.closest('[data-f],[data-s],[data-p],a[data-md]');if(!t)return;
   try{

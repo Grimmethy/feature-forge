@@ -94,6 +94,28 @@ class FilingRouteTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/features/nope/checklist/FF-1/file", json={}).status_code, 404)
         self.assertEqual(self.calls, [])
 
+    def test_a_step_with_pieces_files_each_piece_and_the_rows_say_what_is_left(self):
+        store.write_file(self.slug, "checklist.md", "# Checklist: Thing\n\n- [ ] FF-1 Step <!-- deps: -->\n  Context.\n  - [ ] 1a One\n    text one\n  - [ ] 1b Two\n    text two\n", self.root)
+        rows = {r["id"]: r for r in self.client.get(f"/api/features/{self.slug}/checklist").get_json()}
+        self.assertEqual((rows["FF-1"]["pieceTotal"], rows["FF-1"]["pieceUnfiled"]), (2, 2))
+        r = self.client.post(self.url("FF-1", "file"), json={"piece": "1a"})
+        self.assertEqual([x["piece"] for x in r.get_json()["pieces"]], ["1a"])
+        rows = {r["id"]: r for r in self.client.get(f"/api/features/{self.slug}/checklist").get_json()}
+        self.assertEqual((rows["FF-1"]["pieceUnfiled"], rows["FF-1"]["locked"]), (1, True))
+        self.assertEqual(rows["FF-1"]["pieces"][0]["meta"]["task"], "adhoc-t1")
+        r = self.client.post(self.url("FF-1", "file"), json={})
+        self.assertEqual([x["piece"] for x in r.get_json()["pieces"]], ["1b"])
+        self.assertEqual(self.client.post(self.url("FF-1", "file"), json={}).status_code, 400)             # nothing left to file
+
+    def test_the_piece_argument_must_be_a_label(self):
+        for bad in (5, ["1a"], {"a": 1}, True):
+            with self.subTest(piece=bad):
+                r = self.client.post(self.url("FF-1", "file"), json={"piece": bad})
+                self.assertEqual(r.status_code, 400)
+                self.assertIn("piece must be a piece label", r.get_json()["error"])
+        self.assertEqual(self.client.post(self.url("FF-1", "file"), json={"piece": "1a"}).status_code, 400)    # FF-1 has no pieces
+        self.assertEqual(self.calls, [])
+
     def test_flag_changes_the_item(self):
         r = self.client.post(self.url("FF-2", "flag"), json={"flag": "cloud", "value": True})
         self.assertEqual(r.get_json(), {"id": "FF-2", "flag": "cloud", "value": True})

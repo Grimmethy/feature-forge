@@ -5,7 +5,7 @@ import { createRequire } from 'module';
 const require = createRequire((process.env.PLAYWRIGHT_DIR || '/media/model-cache/github/uxforge') + '/node_modules/');
 const { chromium } = require('playwright-core');
 const base = `http://127.0.0.1:${process.env.FF_PORT || 7599}`;
-const CHECKLIST = '# Checklist: Filing\n\n- [ ] FF-1 Build the core <!-- premium: true deps: -->\n  Write core.py.\n- [ ] FF-2 Watch the folder <!-- deps: FF-1 -->\n  Check it every 5 minutes.\n';
+const CHECKLIST = '# Checklist: Filing\n\n- [ ] FF-1 Build the core <!-- premium: true deps: -->\n  Write core.py.\n- [ ] FF-2 Watch the folder <!-- deps: FF-1 -->\n  Check it every 5 minutes.\n- [ ] FF-3 Two-piece step <!-- deps: FF-2 -->\n  Context.\n  - [ ] 3a First piece\n    Do the first thing.\n  - [ ] 3b Second piece\n    Do the second thing.\n';
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM, args: ['--no-sandbox'] });
 const page = await browser.newPage({ viewport: { width: 1400, height: 850 } });
 const errs = []; page.on('pageerror', e => errs.push(String(e))); page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
@@ -46,6 +46,14 @@ try {
   await page.click('.row[data-item="FF-2"] [data-file]');
   await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('Filed FF-2 as adhoc-fake-2'), null, { timeout: 10000 });
   ok(true, 'File anyway files the polling item');
+  // a step with pieces: one task per piece
+  ok((await page.textContent('.row[data-item="FF-3"] [data-file]')) === 'File', 'a step with unfiled pieces offers File');
+  await page.click('.row[data-item="FF-3"] [data-file]');
+  await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('3a adhoc-fake-3, 3b adhoc-fake-4'), null, { timeout: 10000 });
+  ok(true, 'filing a step with pieces files one task per piece and the toast lists them');
+  await page.waitForFunction(() => document.querySelector('.row[data-item="FF-3"] .piece[data-piece="3b"]').textContent.includes('task adhoc-fake-4'));
+  ok((await txt('.row[data-item="FF-3"] .piece[data-piece="3a"]')).includes('task adhoc-fake-3'), 'each piece shows its own task id');
+  ok(!(await page.$('.row[data-item="FF-3"] [data-file]')), 'once every piece is filed there is no File button');
   // premium on a filed row
   await page.click('.row[data-item="FF-1"] [data-flag="premium"]');
   await page.waitForFunction(() => document.querySelector('.row[data-item="FF-1"] [data-flag="premium"]').textContent === 'Premium: off');

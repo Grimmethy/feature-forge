@@ -116,6 +116,23 @@ def plain_body(item: dict) -> list[str]:
     return out
 
 
+def update_piece(item: dict, piece_id: str, meta: dict | None = None, ticked: bool | None = None) -> bool:
+    """Rewrite one piece line of an item in place: merge `meta` into its comment and/or set its tick. Returns False when there is no such piece."""
+    for n, line in enumerate(item["body"]):
+        m = PIECE_RE.match(line)
+        if not m:
+            continue
+        label = PIECE_LABEL_RE.match(m.group(2).strip())
+        if not label or label.group(1) != piece_id:
+            continue
+        merged = store._parse_meta(m.group(3))
+        merged.update(meta or {})
+        box = "x" if (m.group(1) != " " if ticked is None else ticked) else " "
+        item["body"][n] = f"- [{box}] {piece_id} {label.group(2)}" + (f" <!-- {_meta_text(merged)} -->" if merged else "")
+        return True
+    return False
+
+
 PIECE_BODY_CAP = 2000
 PIECE_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 
