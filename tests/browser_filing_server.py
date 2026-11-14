@@ -28,5 +28,25 @@ def run(cmd, **kw):
 
 
 filing.runner = run
+
+# repo creation: git, gh and the registry are faked too (the repos folder and registry are temp ones next to the features folder)
+from server.core import repo_create
+repos = root.parent / "repos"
+repos.mkdir(exist_ok=True)
+os.environ["FEATUREFORGE_REPOS_ROOT"] = str(repos)
+made = set()
+
+
+def repo_run(cmd, **kw):
+    if cmd[:2] == ["git", "init"]:
+        (Path(cmd[-1]) / ".git").mkdir(parents=True, exist_ok=True)
+    if cmd[:2] == ["gh", "repo"]:
+        made.add(cmd[3])
+    if "get-url" in cmd:
+        return SimpleNamespace(returncode=0 if made else 1, stdout="", stderr="")
+    return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+
+repo_create.runner = repo_run
 filing._urlopen = lambda req, timeout=None: io.BytesIO(b"{}")
 create_app(root).run(host="127.0.0.1", port=port)
