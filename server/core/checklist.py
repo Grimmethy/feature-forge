@@ -1,8 +1,8 @@
 """Checklist diffs: apply a proposed change to a feature's checklist.md safely. Standard library only.
 
 A proposal is {"ops": [...]} with operations:
-  {"op": "add",    "title": ..., "body": ..., "deps": ["FF-2"], "premium": false}
-  {"op": "change", "id": "FF-3", "title": ..., "body": ..., "deps": [...]}   (only the keys given change)
+  {"op": "add",    "title": ..., "body": ..., "deps": ["FF-2"], "premium": false, "pieces": ["title" | {"title", "body"}, ...]}
+  {"op": "change", "id": "FF-3", "title": ..., "body": ..., "deps": [...], "pieces": [...]}   (only the keys given change; pieces are appended)
   {"op": "split",  "id": "FF-3", "into": [{"title": ..., "body": ..., "deps": [...]}, ...]}
   {"op": "remove", "id": "FF-3"}
 
@@ -88,20 +88,57 @@ PIECE_LABEL_RE = re.compile(r"^(\d+[a-z]*\d*)\s+(.+)$")        # a leading label
 
 
 def pieces(item: dict) -> list[dict]:
-    """The sub-pieces of an item: [{'ticked', 'id', 'title', 'meta'}] from its '- [x] 4a title <!-- key: value -->' body lines, in order."""
+    """The sub-pieces of an item: [{'ticked', 'id', 'title', 'meta', 'body'}] from its '- [x] 4a title <!-- key: value -->' body lines, in order.
+    Lines under a piece that are indented two more spaces are that piece's own text ('body'), the task text a worker will see."""
     out = []
     for line in item["body"]:
         m = PIECE_RE.match(line)
         if m:
             label = PIECE_LABEL_RE.match(m.group(2).strip())
             out.append({"ticked": m.group(1) != " ", "id": label.group(1) if label else "",
-                        "title": label.group(2) if label else m.group(2).strip(), "meta": store._parse_meta(m.group(3))})
+                        "title": label.group(2) if label else m.group(2).strip(), "meta": store._parse_meta(m.group(3)), "body": ""})
+        elif out and line.startswith("  "):
+            out[-1]["body"] = (out[-1]["body"] + "\n" + line[2:]).strip("\n")
     return out
 
 
 def plain_body(item: dict) -> list[str]:
-    """The item's body lines that are not sub-pieces."""
-    return [line for line in item["body"] if not PIECE_RE.match(line)]
+    """The item's body lines that are not sub-pieces or a piece's own text."""
+    out, in_piece = [], False
+    for line in item["body"]:
+        if PIECE_RE.match(line):
+            in_piece = True
+        elif in_piece and line.startswith("  "):
+            continue
+        else:
+            in_piece = False
+            out.append(line)
+    return out
+
+
+PIECE_BODY_CAP = 2000
+PIECE_LETTERS = "abcdefghijklmnopqrstuvwxyz"
+
+
+def _piece_lines(item_id: str, specs, taken: set[str]) -> list[str]:
+    """Body lines for new pieces labelled <item number><letter> (4a, 4b...), skipping labels already taken; each spec is a title or {title, body}."""
+    if not isinstance(specs, list) or not specs:
+        raise ChecklistError("pieces must be a non-empty list")
+    num = item_id.split("-")[1]
+    lines: list[str] = []
+    free = (f"{num}{c}" for c in PIECE_LETTERS if f"{num}{c}" not in taken)
+    for spec in specs:
+        title, body = (spec, "") if isinstance(spec, str) else (spec.get("title"), spec.get("body", "")) if isinstance(spec, dict) else (None, "")
+        label = next(free, None)
+        if label is None:
+            raise ChecklistError("an item can have at most 26 pieces")
+        text = str(body or "").strip("\n")
+        if len(text) > PIECE_BODY_CAP or "-->" in text or "<!--" in text:
+            raise ChecklistError(f"a piece's text must be at most {PIECE_BODY_CAP} characters without comment marks")
+        lines.append(f"- [ ] {label} {_clean_title(title)}")
+        if text.strip():
+            lines.extend("  " + b for b in text.split("\n") if b.strip())
+    return lines
 
 
 def next_id(entries: list[dict]) -> str:
@@ -172,6 +209,8 @@ def _new_item(entries: list[dict], spec: dict, inherit: dict | None = None) -> d
     item = {"kind": "item", "raw": None, "ticked": False, "id": new_id, "title": _clean_title(spec.get("title")),
             "meta": meta, "body": _clean_body(spec.get("body")), "dirty": True}
     _set_deps(item, _clean_deps(spec.get("deps"), known, new_id))
+    if spec.get("pieces") is not None:
+        item["body"] = item["body"] + _piece_lines(new_id, spec["pieces"], set())
     return item
 
 
@@ -198,6 +237,8 @@ def _do_change(entries, op):
         it["body"] = _clean_body(op["body"])
     if "deps" in op:
         _set_deps(it, _clean_deps(op["deps"], known, it["id"]))
+    if op.get("pieces") is not None:                       # new pieces are appended; existing ones (ticked or filed) are never touched
+        it["body"] = it["body"] + _piece_lines(it["id"], op["pieces"], {p["id"] for p in pieces(it)})
     if is_locked(it):
         it["meta"]["changed"] = time.strftime("%Y-%m-%d")
     it["dirty"] = True

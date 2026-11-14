@@ -89,6 +89,13 @@ class PieceTests(unittest.TestCase):
     def test_plain_body_keeps_only_the_other_lines(self):
         self.assertEqual(cl.plain_body(self.item()), ["Some plain text about the parent.", "More plain text after the pieces."])
 
+    def test_a_pieces_own_text_belongs_to_the_piece_not_the_plain_body(self):
+        text = "# C\n\n- [ ] FF-1 P <!-- deps: -->\n  Intro.\n  - [ ] 1a One\n    detail line one\n    detail line two\n  - [x] 1b Two <!-- merged: abc1234 -->\n  Outro.\n"
+        it = self.item(text)
+        self.assertEqual([(p["id"], p["body"]) for p in cl.pieces(it)], [("1a", "detail line one\ndetail line two"), ("1b", "")])
+        self.assertEqual(cl.plain_body(it), ["Intro.", "Outro."])
+        self.assertEqual(cl.render(cl.parse(text)), text)
+
     def test_a_sentence_containing_a_checkbox_is_not_a_piece(self):
         child = self.item(n=1)
         self.assertEqual(cl.pieces(child), [])
@@ -116,6 +123,64 @@ class PieceTests(unittest.TestCase):
         text = store.read_file(slug, "checklist.md", root)
         self.assertIn("  - [x] 1a First piece <!-- merged: abc1234 -->", text)
         self.assertEqual(len(cl.pieces(cl.items(cl.parse(text))[0])), 3)
+
+
+class PieceOpTests(Base):
+    def pieces_of(self, item_id):
+        return cl.pieces(self.by_id()[item_id])
+
+    def test_add_with_pieces_labels_them_from_the_new_item_number(self):
+        self.apply({"op": "add", "title": "Fifth", "body": "why", "deps": ["FF-4"],
+                    "pieces": ["First task", {"title": "Second task", "body": "Edit core.py.\nAcceptance: tests pass."}]})
+        ps = self.pieces_of("FF-5")
+        self.assertEqual([(p["id"], p["title"], p["ticked"]) for p in ps], [("5a", "First task", False), ("5b", "Second task", False)])
+        self.assertEqual(ps[1]["body"], "Edit core.py.\nAcceptance: tests pass.")
+        self.assertEqual(ps[0]["body"], "")
+        self.assertEqual(cl.plain_body(self.by_id()["FF-5"]), ["why"])
+        self.assertIn("  - [ ] 5b Second task\n    Edit core.py.\n    Acceptance: tests pass.", self.text())
+
+    def test_the_rendered_result_round_trips_and_is_stable(self):
+        self.apply({"op": "add", "title": "Fifth", "pieces": [{"title": "A", "body": "text"}, "B"]})
+        text = self.text()
+        self.assertEqual(cl.render(cl.parse(text)), text)
+
+    def test_change_appends_pieces_with_the_next_free_labels_and_leaves_existing_ones(self):
+        self.apply({"op": "add", "title": "Fifth", "pieces": ["A", "B"]})
+        before = [dict(p) for p in self.pieces_of("FF-5")]
+        self.apply({"op": "change", "id": "FF-5", "pieces": [{"title": "C", "body": "later"}]})
+        ps = self.pieces_of("FF-5")
+        self.assertEqual([p["id"] for p in ps], ["5a", "5b", "5c"])
+        self.assertEqual(ps[:2], before)
+        self.assertEqual(ps[2]["body"], "later")
+
+    def test_labels_skip_taken_ones(self):
+        store.write_file(self.slug, "checklist.md", FIXTURE + "  - [x] 4a Old <!-- merged: abc1234 -->\n  - [ ] 4c Odd\n", self.root)
+        self.apply({"op": "change", "id": "FF-4", "pieces": ["New one", "New two"]})
+        self.assertEqual([p["id"] for p in self.pieces_of("FF-4")], ["4a", "4c", "4b", "4d"])
+
+    def test_a_filed_item_can_gain_pieces_and_is_marked_changed(self):
+        self.apply({"op": "change", "id": "FF-1", "pieces": ["Late task"]})
+        it = self.by_id()["FF-1"]
+        self.assertEqual([p["id"] for p in cl.pieces(it)], ["1a"])
+        self.assertTrue(it["meta"]["changed"])
+        self.assertEqual(it["meta"]["task"], "adhoc-1")
+
+    def test_split_parts_can_carry_pieces(self):
+        self.apply({"op": "split", "id": "FF-3", "into": [{"title": "Part one", "pieces": ["x"]}, {"title": "Part two"}]})
+        self.assertEqual([p["id"] for p in self.pieces_of("FF-5")], ["5a"])
+        self.assertEqual(self.pieces_of("FF-6"), [])
+
+    def test_bad_pieces_are_refused_and_nothing_is_written(self):
+        for bad in ([], "title", [{"body": "no title"}], [""], ["a --> b"], [{"title": "ok", "body": "x --> y"}], [{"title": "ok", "body": "z" * 2001}],
+                    [5], ["x"] * 27):
+            with self.subTest(pieces=bad if len(str(bad)) < 40 else "long"):
+                self.refused({"op": "add", "title": "T", "pieces": bad})
+        self.assertEqual(self.text(), FIXTURE)
+
+    def test_26_pieces_fit_and_the_next_one_does_not(self):
+        self.apply({"op": "add", "title": "Big", "pieces": [f"p{n}" for n in range(26)]})
+        self.assertEqual(len(self.pieces_of("FF-5")), 26)
+        self.assertIn("at most 26", self.refused({"op": "change", "id": "FF-5", "pieces": ["one too many"]}))
 
 
 class AddTests(Base):
