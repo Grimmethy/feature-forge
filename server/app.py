@@ -3,7 +3,7 @@
 Routes: GET / (the single-page UI), GET /api/health, GET|POST /api/features, GET /api/features/<slug>/tree,
 GET|PUT /api/features/<slug>/file?path=, GET /api/features/<slug>/render?path=, GET /api/search?q=,
 GET /api/repos, GET|POST /api/features/<slug>/repo, GET /api/features/<slug>/checklist, POST .../checklist/preview|apply,
-POST /api/features/<slug>/checklist/<id>/file|flag, POST /api/features/<slug>/sync, POST /api/grill/<slug>/<sid>/proposal, and the grill routes: POST /api/grill/start,
+POST /api/features/<slug>/checklist/<id>/file|flag, POST /api/features/<slug>/sync, GET /api/views/board, GET /api/views/repos, GET /api/features/<slug>/graph.svg, POST /api/grill/<slug>/<sid>/proposal, and the grill routes: POST /api/grill/start,
 GET /api/grill/<slug>/sessions, POST /api/grill/<slug>/<sid>/begin|message (server-sent events), /save and /end.
 No timers and no polling: every response is computed when asked.
 """
@@ -19,7 +19,7 @@ import markdown as md
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from server.core import checklist, filing, grill, status, store  # noqa: E402
+from server.core import checklist, filing, grill, status, store, views  # noqa: E402
 
 HREF_RE = re.compile(r'href="(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+\.md)"', re.I)
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -154,6 +154,18 @@ def create_app(root: Path | None = None) -> Flask:
                          "deps": checklist._deps(i), "body": "\n".join(i["body"]), "meta": i["meta"],
                          "lint": filing.lint(i["title"] + "\n" + "\n".join(i["body"]))}
                         for i in checklist.items(entries)])
+
+    @app.get("/api/views/board")
+    def view_board():
+        return jsonify(views.board(froot()))
+
+    @app.get("/api/views/repos")
+    def view_repos():
+        return jsonify(views.by_repo(froot()))
+
+    @app.get("/api/features/<slug>/graph.svg")
+    def feature_graph(slug):
+        return Response(views.graph_svg(slug, froot()), mimetype="image/svg+xml")
 
     @app.post("/api/features/<slug>/sync")
     def feature_sync(slug):
