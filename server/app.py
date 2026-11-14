@@ -3,7 +3,7 @@
 Routes: GET / (the single-page UI), GET /api/health, GET|POST /api/features, GET /api/features/<slug>/tree,
 GET|PUT /api/features/<slug>/file?path=, GET /api/features/<slug>/render?path=, GET /api/search?q=,
 GET /api/repos, GET|POST /api/features/<slug>/repo, GET /api/features/<slug>/checklist, POST .../checklist/preview|apply,
-POST /api/grill/<slug>/<sid>/proposal, and the grill routes: POST /api/grill/start,
+POST /api/features/<slug>/checklist/<id>/file|flag, POST /api/grill/<slug>/<sid>/proposal, and the grill routes: POST /api/grill/start,
 GET /api/grill/<slug>/sessions, POST /api/grill/<slug>/<sid>/begin|message (server-sent events), /save and /end.
 No timers and no polling: every response is computed when asked.
 """
@@ -19,7 +19,7 @@ import markdown as md
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from server.core import checklist, grill, store  # noqa: E402
+from server.core import checklist, filing, grill, store  # noqa: E402
 
 HREF_RE = re.compile(r'href="(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+\.md)"', re.I)
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -71,6 +71,12 @@ def create_app(root: Path | None = None) -> Flask:
     @app.errorhandler(checklist.ChecklistError)
     def checklist_error(e: checklist.ChecklistError):
         return jsonify({"error": str(e)}), 400
+
+    @app.errorhandler(filing.FilingError)
+    def filing_error(e: filing.FilingError):
+        msg = str(e)
+        code = 404 if msg.startswith("no such") else 502 if msg.startswith("Agent Manager did not accept") else 400
+        return jsonify({"error": msg}), code
 
     @app.errorhandler(grill.GrillError)
     def grill_error(e: grill.GrillError):
@@ -145,8 +151,23 @@ def create_app(root: Path | None = None) -> Flask:
     def get_checklist(slug):
         entries = checklist.parse(store.read_file(slug, "checklist.md", froot()))
         return jsonify([{"id": i["id"], "title": i["title"], "ticked": i["ticked"], "locked": checklist.is_locked(i),
-                         "deps": checklist._deps(i), "body": "\n".join(i["body"]), "meta": i["meta"]}
+                         "deps": checklist._deps(i), "body": "\n".join(i["body"]), "meta": i["meta"],
+                         "lint": filing.lint(i["title"] + "\n" + "\n".join(i["body"]))}
                         for i in checklist.items(entries)])
+
+    @app.post("/api/features/<slug>/checklist/<item_id>/file")
+    def checklist_file(slug, item_id):
+        accept = (request.get_json(silent=True) or {}).get("acceptLint")
+        if accept is not None and not isinstance(accept, bool):
+            return jsonify({"error": "acceptLint must be true or false"}), 400
+        return jsonify(filing.file_item(slug, item_id, bool(accept), froot()))
+
+    @app.post("/api/features/<slug>/checklist/<item_id>/flag")
+    def checklist_flag(slug, item_id):
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body.get("value"), bool):
+            return jsonify({"error": "value must be true or false"}), 400
+        return jsonify(filing.set_flag(slug, item_id, str(body.get("flag")), body["value"], froot()))
 
     @app.post("/api/features/<slug>/checklist/preview")
     def checklist_preview(slug):

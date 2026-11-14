@@ -44,6 +44,12 @@ class PageTests(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, SCRIPT)
 
+    def test_filing_buttons_are_wired_to_the_routes(self):
+        for needle in ("data-file", "data-flag", "/checklist/${id}/file", "/checklist/${pb.dataset.id}/flag", "acceptLint", "lintArmed",
+                       "File anyway", "Polling language"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, SCRIPT)
+
     def test_a_refused_op_cannot_be_ticked(self):
         self.assertIn("r.ok?'checked':'disabled'", SCRIPT)
 
