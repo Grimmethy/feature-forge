@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import store
+from . import checklist, store
 
 PROTOCOL_PATH = Path(__file__).resolve().parents[2] / "Docs" / "GRILL_PROTOCOL.md"
 DEFAULT_ACCOUNT = "claude-main"
@@ -24,6 +24,7 @@ TREE_CAP = 120                  # lines of the repo file tree
 REPO_DOCS = ("CONTEXT.md", "CLAUDE.md", "AGENTS.md", "README.md")
 SKIP_REPO = re.compile(r"(-pipeline|-manual|-BACKUP|-hub-p\d+|-wake-others\d*|-test-tmp)", re.I)
 BOOKKEEPING_RE = re.compile(r"^(CONTEXT-LOG|TASK-REF):.*$", re.M)
+PROPOSAL_RE = re.compile(r"```checklist-diff[ \t]*\n(.*?)\n[ \t]*```", re.S)
 
 _urlopen = urllib.request.urlopen     # tests replace this
 
@@ -107,7 +108,26 @@ def _tree(repo: Path) -> str:
 
 # ---- seed ------------------------------------------------------------------------------------------------
 
-def build_seed(slug: str, root: Path | None = None, repos: Path | None = None, protocol: Path | None = None) -> str:
+def item_section(slug: str, node: str, root: Path | None = None) -> str:
+    """The seed part for a grill about ONE checklist item: its text, what it waits for, what waits for it."""
+    entries = checklist.parse(store.read_file(slug, "checklist.md", root))
+    all_items = checklist.items(entries)
+    it = next((i for i in all_items if i["id"] == node), None)
+    if it is None:
+        raise GrillError(f"no such item {node}")
+    deps = checklist._deps(it)
+    waiting = [i["id"] for i in all_items if node in checklist._deps(i)]
+    body = "\n".join(it["body"]) or "(no task text yet)"
+    return (f"\n\n## This session is about checklist item {node}: {it['title']}\n\n"
+            f"Filed: {'yes (locked: it can only be reworded, never split or removed)' if checklist.is_locked(it) else 'no'}. "
+            f"It waits for: {', '.join(deps) or 'nothing'}. Waiting for it: {', '.join(waiting) or 'nothing'}.\n\nTask text:\n{body}\n\n"
+            "Your job: make this ONE small, self-contained task that a worker who sees only its own repo can finish. If it is "
+            "bigger than that, propose splitting it into smaller tasks. After the owner confirms, end with a checklist-diff block "
+            "in the format the protocol describes.")
+
+
+def build_seed(slug: str, root: Path | None = None, repos: Path | None = None, protocol: Path | None = None,
+               node: str = "feature") -> str:
     fdir = store.feature_dir(slug, root)
     proto = Path(protocol) if protocol is not None else PROTOCOL_PATH
     protocol_text = proto.read_text(encoding="utf-8") if proto.is_file() else ""
@@ -140,6 +160,8 @@ def build_seed(slug: str, root: Path | None = None, repos: Path | None = None, p
         add("existing repositories", index)
         target = ("No target repo is chosen yet. Question 1 of your first round MUST be the repo: recommend an existing repo "
                   "from the list below or a new one (propose its name), say why, and let the owner decide.")
+    if node != "feature":
+        target += item_section(slug, node, root)
     return (
         f"You are running a Feature Forge grill session for the feature `{slug}`.\n\n"
         "Follow this protocol exactly. This conversation is READ-ONLY: use Read, Grep and Glob to look things up, never try "
@@ -181,6 +203,8 @@ def list_sessions(slug: str, root: Path | None = None) -> list[dict]:
 def start(slug: str, node: str = "feature", account: str | None = None, root: Path | None = None) -> dict:
     """Open a read-only Claude chat session for this feature (node: 'feature' or a checklist item id like FF-3)."""
     store.feature_dir(slug, root)
+    if node != "feature":
+        item_section(slug, node, root)        # refuses an item that does not exist before any chat call
     sid = _call("POST", "/api/chat/new", {"provider": "claude", "readOnly": True})["id"]
     _call("POST", f"/api/chat/{sid}/swap", {"provider": "claude", "account": account or DEFAULT_ACCOUNT})
     meta = {"id": sid, "feature": slug, "node": node, "provider": "claude", "account": account or DEFAULT_ACCOUNT,
@@ -193,7 +217,7 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
     """Yield the chat plugin's server-sent-event lines. message=None sends the seed (the first turn)."""
     meta = load_meta(slug, sid, root)
     if message is None:
-        text = build_seed(slug, root, repos)
+        text = build_seed(slug, root, repos, node=meta.get("node") or "feature")
         meta["seeded"] = True
         save_meta(slug, meta, root)
     else:
@@ -205,6 +229,31 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
                 yield (raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw).rstrip("\r\n") + "\n"
     except GrillError as e:
         yield "data: " + json.dumps({"type": "error", "error": str(e)}) + "\n\n"
+
+
+def extract_proposal(text: str) -> dict:
+    """The LAST fenced block tagged checklist-diff in a model reply, parsed: {"ops": [...]}."""
+    blocks = PROPOSAL_RE.findall(text or "")
+    if not blocks:
+        raise GrillError("no checklist-diff block found")
+    try:
+        proposal = json.loads(blocks[-1])
+    except ValueError as e:
+        raise GrillError(f"the checklist-diff block is not valid JSON: {e}") from e
+    if not isinstance(proposal, dict) or not isinstance(proposal.get("ops"), list) or not proposal["ops"]:
+        raise GrillError("the checklist-diff block has no ops")
+    return proposal
+
+
+def proposal_from_session(slug: str, sid: str, root: Path | None = None) -> dict:
+    """The newest checklist-diff proposal in this grill session's conversation."""
+    load_meta(slug, sid, root)
+    for e in reversed(transcript(sid)):
+        if e.get("role") == "assistant" and not e.get("marker"):
+            text = e.get("display_text") or e.get("text") or ""
+            if PROPOSAL_RE.search(text):
+                return extract_proposal(text)
+    raise GrillError("no checklist-diff proposal in this conversation yet")
 
 
 def transcript(sid: str) -> list[dict]:

@@ -95,11 +95,18 @@ class GrillRouteTests(unittest.TestCase):
 
     # ---- grill ----
     def test_start_creates_a_read_only_session(self):
+        store.write_file(self.slug, "checklist.md", "# Checklist: Thing\n\n- [ ] FF-3 Third item\n", self.root)
         r = self.client.post("/api/grill/start", json={"feature": self.slug, "node": "FF-3"})
         self.assertEqual(r.status_code, 201)
         self.assertEqual((r.get_json()["id"], r.get_json()["node"]), ("chat-1-abc", "FF-3"))
         self.assertEqual(self.fake.calls[0][2], {"provider": "claude", "readOnly": True})
         self.assertEqual([s["id"] for s in self.client.get(f"/api/grill/{self.slug}/sessions").get_json()], ["chat-1-abc"])
+
+    def test_start_for_an_unknown_checklist_item_is_404_before_any_chat_call(self):
+        r = self.client.post("/api/grill/start", json={"feature": self.slug, "node": "FF-9"})
+        self.assertEqual(r.status_code, 404)
+        self.assertIn("no such item", r.get_json()["error"])
+        self.assertEqual(self.fake.calls, [])
 
     def test_start_errors(self):
         self.assertEqual(self.client.post("/api/grill/start", json={"feature": "nope"}).status_code, 404)

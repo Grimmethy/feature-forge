@@ -19,3 +19,24 @@ Written so any model can run it. Goal: a shared understanding of one feature (or
 - `interview.md`: answers close to verbatim.
 - `plan.md`: the agreed design.
 - `checklist.md`: proposed as a DIFF against the current list (new, changed, split items). Filed items are locked.
+
+## Checklist output format (item and feature grills)
+
+When the owner has confirmed the plan, end your reply with ONE fenced block tagged `checklist-diff` holding JSON, and nothing after it:
+
+```checklist-diff
+{"ops": [
+  {"op": "add", "title": "...", "body": "full self-contained task text, files, acceptance", "deps": ["FF-2"]},
+  {"op": "change", "id": "FF-3", "title": "...", "body": "..."},
+  {"op": "split", "id": "FF-4", "into": [{"title": "...", "body": "..."}, {"title": "...", "body": "..."}]},
+  {"op": "remove", "id": "FF-5"}
+]}
+```
+
+Rules for the block:
+- Prefer more, smaller tasks. Each task text must stand alone: a worker sees only its own repo, so name the files, the tests and the acceptance check in the body.
+- Filed items (their line has a task or filed key) can only be reworded with `change`; never split or remove them.
+- Every dependency must be an existing item; no cycles. A split's parts chain one after another unless you give `deps`.
+- For every task answer "what event could trigger this instead of a timer?" and say so in the body; a poll or timer needs a written justification there.
+- Propose nothing the owner has not confirmed. The page shows the block as a preview; the owner accepts each operation before anything is written.
+
