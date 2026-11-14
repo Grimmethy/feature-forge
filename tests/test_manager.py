@@ -196,6 +196,96 @@ class TickTests(Base):
         self.assertEqual(self.tick("on")["result"], "idle")
 
 
+class PieceManagerTests(Base):
+    def setUp(self):
+        super().setUp()
+        filed = (NOW - timedelta(minutes=150)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.write_pieces(filed)
+
+    def write_pieces(self, filed, premium=""):
+        store.write_file(self.slug, "checklist.md",
+                         f"# Checklist: Thing\n\n- [ ] FF-1 Step <!-- {premium}filed: {filed} deps: -->\n  Context.\n"
+                         f"  - [ ] 1a First <!-- task: p-a filed: {filed} -->\n    text a\n"
+                         f"  - [ ] 1b Second <!-- task: p-b filed: {filed} -->\n", self.root)
+
+    def piece(self, pid):
+        return {p["id"]: p for p in checklist.pieces(self.items()["FF-1"])}[pid]
+
+    def test_a_pieces_task_is_watched_under_its_own_key(self):
+        self.put("blocked", "p-a", {"status": "blocked"})
+        self.put("review", "p-b", {"status": "review"})
+        r = self.tick("dry-run")
+        self.assertEqual((r["item"], r["outcome"]), ("FF-1/1a", "flag"))
+        self.assertEqual(self.ledger()[0]["item"], "FF-1/1a")
+        self.assertEqual(self.tick("dry-run")["result"], "idle")                 # 1b is moving, 1a was already decided
+
+    def test_bumping_one_piece_raises_only_its_own_task_and_stamps_only_its_line(self):
+        self.put("pending", "p-a", {"status": "pending"})
+        self.put("review", "p-b", {"status": "review"})
+        r = self.tick("on")
+        self.assertEqual((r["item"], r["outcome"], r["done"]), ("FF-1/1a", "bump", "premium set"))
+        self.assertEqual(len(self.posts), 1)
+        self.assertIn("p-a/premium-priority", self.posts[0])
+        self.assertEqual(self.piece("1a")["meta"]["bumped"], "2026-11-14T12:00:00Z")
+        self.assertNotIn("bumped", self.piece("1b")["meta"])
+        self.assertNotIn("premium", self.items()["FF-1"]["meta"])                # the step's own flag is not touched
+        self.assertEqual(self.piece("1a")["body"], "text a")
+        self.assertEqual(self.tick("on")["result"], "idle")                      # never bumped twice
+
+    def test_a_step_that_is_already_premium_is_not_bumped_through_its_pieces(self):
+        self.write_pieces((NOW - timedelta(minutes=150)).strftime("%Y-%m-%dT%H:%M:%SZ"), premium="premium: true ")
+        self.put("pending", "p-a", {"status": "pending"})
+        self.put("review", "p-b", {"status": "review"})
+        self.assertEqual(self.tick("on")["result"], "idle")
+
+    def test_a_merged_piece_is_ticked_through_the_status_sync(self):
+        self.put("done", "p-a", {"status": "done", "mergedAt": "2026-11-14T11:30:00+00:00"})
+        self.put("review", "p-b", {"status": "review"})
+        r = self.tick("on")
+        self.assertEqual((r["item"], r["outcome"]), ("FF-1/1a", "tick"))
+        self.assertTrue(self.piece("1a")["ticked"])
+        self.assertFalse(self.items()["FF-1"]["ticked"])
+
+    def test_a_vanished_piece_task_is_filed_again_for_that_piece_only(self):
+        self.put("review", "p-b", {"status": "review"})
+        r = self.tick("on")
+        self.assertEqual((r["item"], r["outcome"], r["done"]), ("FF-1/1a", "refile", "filed again as t-new"))
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.piece("1a")["meta"]["task"], "t-new")
+        self.assertEqual(self.piece("1b")["meta"]["task"], "p-b")
+        self.assertIn("FF-1/1a: task vanished, filed again as t-new", (self.root / self.slug / "notes.md").read_text())
+
+    def test_refiling_one_piece_does_not_file_the_pieces_that_were_never_filed(self):
+        filed = (NOW - timedelta(minutes=150)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        store.write_file(self.slug, "checklist.md", f"# Checklist: Thing\n\n- [ ] FF-1 Step <!-- filed: {filed} deps: -->\n"
+                         f"  - [ ] 1a First <!-- task: p-a filed: {filed} -->\n  - [ ] 1b Second\n", self.root)
+        self.tick("on")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.piece("1a")["meta"]["task"], "t-new")
+        self.assertNotIn("task", self.piece("1b")["meta"])
+
+    def test_notes_name_the_piece(self):
+        self.put("blocked", "p-a", {"status": "blocked"})
+        self.put("review", "p-b", {"status": "review"})
+        self.tick("on")
+        self.assertIn("FF-1/1a: blocked for 150 minutes", (self.root / self.slug / "notes.md").read_text())
+
+    def test_ticked_pieces_are_not_candidates(self):
+        self.put("review", "p-b", {"status": "review"})
+        text = store.read_file(self.slug, "checklist.md", self.root).replace("- [ ] 1a First", "- [x] 1a First")
+        store.write_file(self.slug, "checklist.md", text, self.root)
+        self.assertEqual([c["item"] for c in manager.candidates(self.root)], ["FF-1/1b"])
+
+    def test_items_and_pieces_are_ordered_together_oldest_first(self):
+        old = (NOW - timedelta(minutes=300)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        mid = (NOW - timedelta(minutes=200)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        new = (NOW - timedelta(minutes=150)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        store.write_file(self.slug, "checklist.md",
+                         f"# Checklist: Thing\n\n- [ ] FF-1 Step <!-- filed: {new} deps: -->\n  - [ ] 1a A <!-- task: p-a filed: {new} -->\n"
+                         f"- [ ] FF-2 Plain <!-- task: t-plain filed: {old} deps: -->\n  - [ ] 2a B <!-- task: p-b filed: {mid} -->\n", self.root)
+        self.assertEqual([c["item"] for c in manager.candidates(self.root)], ["FF-2", "FF-2/2a", "FF-1/1a"])
+
+
 class DeadlineTests(Base):
     def test_no_deadline_before_ten_samples_then_twice_the_median(self):
         self.assertIsNone(manager.deadline_minutes(self.root))

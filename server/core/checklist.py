@@ -116,8 +116,8 @@ def plain_body(item: dict) -> list[str]:
     return out
 
 
-def update_piece(item: dict, piece_id: str, meta: dict | None = None, ticked: bool | None = None) -> bool:
-    """Rewrite one piece line of an item in place: merge `meta` into its comment and/or set its tick. Returns False when there is no such piece."""
+def update_piece(item: dict, piece_id: str, meta: dict | None = None, ticked: bool | None = None, drop: tuple = ()) -> bool:
+    """Rewrite one piece line of an item in place: merge `meta` into its comment, remove the `drop` keys and/or set its tick. Returns False when there is no such piece."""
     for n, line in enumerate(item["body"]):
         m = PIECE_RE.match(line)
         if not m:
@@ -127,6 +127,8 @@ def update_piece(item: dict, piece_id: str, meta: dict | None = None, ticked: bo
             continue
         merged = store._parse_meta(m.group(3))
         merged.update(meta or {})
+        for k in drop:
+            merged.pop(k, None)
         box = "x" if (m.group(1) != " " if ticked is None else ticked) else " "
         item["body"][n] = f"- [{box}] {piece_id} {label.group(2)}" + (f" <!-- {_meta_text(merged)} -->" if merged else "")
         return True

@@ -1,11 +1,12 @@
 """The feature manager's decisions: keep filed feature tasks from being forgotten or lost. Standard library only.
 
-It is a WATCHER. For each filed, unticked checklist item it looks at where the Agent Manager task stands and picks one outcome from a
+It is a WATCHER. For each filed, unticked task (an item's own task, or a sub-piece's task, keyed 'FF-4/4c') it looks at where the Agent Manager task stands and picks one outcome from a
 closed list; it never carries, verifies, merges, discards or archives anything (those loops already exist elsewhere):
   ok           the task is moving: nothing to do
   tick         the task merged: tick the item (status.sync)
-  bump         the task sits unclaimed (adhoc or pending) past UNCLAIMED_MIN minutes: set premium once ('bumped:' stamp, never twice)
-  refile       the task vanished from every queue folder: file the item again
+  bump         the task sits unclaimed (adhoc or pending) past UNCLAIMED_MIN minutes: set premium once ('bumped:' stamp, never twice;
+               for a piece only that piece's task is raised and only its line is stamped)
+  refile       the task vanished from every queue folder: file the item (or just that piece) again
   flag         anything else that needs an owner's eye (blocked, needs clarification, done but never merged, archived, overdue):
                one line in features/<slug>/notes.md
 One item per tick. Modes: off, dry-run (the default: only the ledger says what it would do) and on. Every decision is written to
@@ -102,36 +103,48 @@ def _note(slug: str, item_id: str, text: str, root: Path | None, now: datetime) 
         f.write(f"{head}- {now.strftime('%Y-%m-%dT%H:%M:%SZ')} {item_id}: {text}\n")
 
 
-def _act(outcome: str, slug: str, item_id: str, reason: str, root: Path | None, now: datetime) -> str:
+def _act(outcome: str, slug: str, key: str, reason: str, root: Path | None, now: datetime) -> str:
+    """Do one decision. `key` is an item id ('FF-4') or a piece ('FF-4/4c')."""
+    item_id, _, piece_id = key.partition("/")
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     if outcome == "tick":
         status.sync(slug, root)
         return "ticked via status sync"
     if outcome == "bump":
-        filing.set_flag(slug, item_id, "premium", True, root)
         entries = checklist.parse(store.read_file(slug, "checklist.md", root))
-        for it in checklist.items(entries):
-            if it["id"] == item_id:
-                it["meta"]["bumped"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-                it["dirty"] = True
+        it = next(i for i in checklist.items(entries) if i["id"] == item_id)
+        if piece_id:                                           # one piece: only its own task is raised, and only its line is stamped
+            task = next(p["meta"]["task"] for p in checklist.pieces(it) if p["id"] == piece_id)
+            project = filing.project_for(grill.target_repo(slug, root)["name"])
+            filing._post(f"/api/task-anywhere/{task}/premium-priority?project={project['repoRoot']}", {"enabled": True, "by": "operator-ui"})
+            checklist.update_piece(it, piece_id, {"bumped": stamp})
+        else:
+            filing.set_flag(slug, item_id, "premium", True, root)
+            entries = checklist.parse(store.read_file(slug, "checklist.md", root))
+            it = next(i for i in checklist.items(entries) if i["id"] == item_id)
+            it["meta"]["bumped"] = stamp
+            it["dirty"] = True
         store.write_file(slug, "checklist.md", checklist.render(entries), root)
         return "premium set"
     if outcome == "refile":
         entries = checklist.parse(store.read_file(slug, "checklist.md", root))
-        for it in checklist.items(entries):
-            if it["id"] == item_id:
-                it["meta"].pop("task", None)
-                it["meta"].pop("filed", None)
-                it["dirty"] = True
+        it = next(i for i in checklist.items(entries) if i["id"] == item_id)
+        if piece_id:
+            checklist.update_piece(it, piece_id, drop=("task", "filed"))
+        else:
+            it["meta"].pop("task", None)
+            it["meta"].pop("filed", None)
+            it["dirty"] = True
         store.write_file(slug, "checklist.md", checklist.render(entries), root)
-        r = filing.file_item(slug, item_id, accept_lint=True, root=root)
-        _note(slug, item_id, f"task vanished, filed again as {r['task']}", root, now)
+        r = filing.file_item(slug, item_id, accept_lint=True, root=root, piece=piece_id or None)
+        _note(slug, key, f"task vanished, filed again as {r['task']}", root, now)
         return f"filed again as {r['task']}"
-    _note(slug, item_id, reason, root, now)
+    _note(slug, key, reason, root, now)
     return "note written"
 
 
 def candidates(root: Path | None = None) -> list[dict]:
-    """Every filed, unticked item with where its task stands, oldest filing first."""
+    """Every filed, unticked task with where it stands, oldest filing first: an item's own task and each piece's task (item 'FF-4/4c')."""
     out = []
     for f in store.list_features(root):
         slug = f["slug"]
@@ -144,11 +157,15 @@ def candidates(root: Path | None = None) -> list[dict]:
         except (store.StoreError, filing.FilingError):
             continue
         for it in checklist.items(entries):
-            if it["ticked"] or not it["meta"].get("task"):
+            if it["ticked"]:
                 continue
-            label, rec = status.find_task(pipeline, it["meta"]["task"])
-            filed = status._filed_at(it["meta"], rec or {})
-            out.append({"slug": slug, "item": it["id"], "task": it["meta"]["task"], "label": label, "record": rec, "meta": it["meta"], "filed": filed})
+            units = [(it["id"], it["meta"])] if it["meta"].get("task") else []
+            units += [(f"{it['id']}/{p['id']}", dict(p["meta"], premium=it["meta"].get("premium", ""))) for p in checklist.pieces(it)
+                      if not p["ticked"] and p["meta"].get("task")]
+            for key, meta in units:
+                label, rec = status.find_task(pipeline, meta["task"])
+                out.append({"slug": slug, "item": key, "task": meta["task"], "label": label, "record": rec, "meta": meta,
+                            "filed": status._filed_at(meta, rec or {})})
     return sorted(out, key=lambda c: (c["filed"] is None, c["filed"] or datetime.max.replace(tzinfo=timezone.utc)))
 
 
