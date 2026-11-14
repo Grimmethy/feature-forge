@@ -39,6 +39,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('Filed FF-1 as adhoc-fake-1'), null, { timeout: 10000 });
   await page.waitForFunction(() => document.querySelector('.row[data-item="FF-1"]').textContent.includes('task adhoc-fake-1'));
   ok(!(await page.$('.row[data-item="FF-1"] [data-file]')), 'a filed row shows its task and no File button');
+  ok((await txt('.row[data-item="FF-1"]')).includes('task adhoc-fake-1 · review'), 'the sync reads the queue and the row shows the task state (review)');
   ok(!(await page.$('.row[data-item="FF-1"] [data-flag="cloud"]')), 'a filed row has no cloud toggle');
   ok((await txt('.row[data-item="FF-1"]')).includes('filed'), 'the filed tag shows');
   // FF-2 now: armed state survives the redraw, a second press files it

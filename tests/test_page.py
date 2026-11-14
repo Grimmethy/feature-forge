@@ -50,6 +50,11 @@ class PageTests(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, SCRIPT)
 
+    def test_the_page_syncs_task_states_when_the_checklist_opens(self):
+        for needle in ("/api/features/${cur}/sync", "taskStates", "Merged: ", "took ${esc(m.took)} min"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, SCRIPT)
+
     def test_a_refused_op_cannot_be_ticked(self):
         self.assertIn("r.ok?'checked':'disabled'", SCRIPT)
 

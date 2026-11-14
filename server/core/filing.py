@@ -166,7 +166,7 @@ def file_item(slug: str, item_id: str, accept_lint: bool = False, root: Path | N
     task = Path(m.group(1)).stem
     premium = it["meta"].get("premium") == "true"
     it["meta"]["task"] = task
-    it["meta"]["filed"] = time.strftime("%Y-%m-%d")
+    it["meta"]["filed"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     it["dirty"] = True
     _write_entries(slug, entries, root)                  # the task exists now: record it before anything else can fail
     out = {"id": item_id, "task": task, "premium": premium, "warnings": warnings}

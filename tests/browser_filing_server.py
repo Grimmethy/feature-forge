@@ -14,13 +14,16 @@ from server.core import filing
 
 root, port = Path(sys.argv[1]), int(sys.argv[2])
 reg = root.parent / "projects.json"
-reg.write_text(json.dumps([{"repoRoot": "/r/alpha", "pipelineDir": "/p/a", "domainsPath": "/p/a/d.json", "label": "alpha"}]))
+pipe = root.parent / "pipe"
+(pipe / "queue" / "review").mkdir(parents=True)
+reg.write_text(json.dumps([{"repoRoot": "/r/alpha", "pipelineDir": str(pipe), "domainsPath": str(pipe / "d.json"), "label": "alpha"}]))
 os.environ["FEATUREFORGE_PROJECTS"] = str(reg)
 n = [0]
 
 
 def run(cmd, **kw):
     n[0] += 1
+    (pipe / "queue" / "review" / f"adhoc-fake-{n[0]}.json").write_text(json.dumps({"status": "review"}))      # the filed task sits in review
     return SimpleNamespace(returncode=0, stdout=f"queued adhoc task: /p/a/queue/adhoc/adhoc-fake-{n[0]}.json\n", stderr="")
 
 
