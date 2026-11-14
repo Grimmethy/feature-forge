@@ -169,6 +169,14 @@ class ApplyTests(Base):
         with self.assertRaisesRegex(cl.ChecklistError, "no ops"):
             cl.preview(self.slug, {}, self.root)
 
+    def test_a_proposal_that_is_not_an_object_is_an_error_not_a_crash(self):
+        for bad in ["text", ["ops"], 5, None, True]:
+            with self.subTest(proposal=bad):
+                with self.assertRaisesRegex(cl.ChecklistError, "no ops"):
+                    cl.preview(self.slug, bad, self.root)
+                with self.assertRaisesRegex(cl.ChecklistError, "no ops"):
+                    cl.apply(self.slug, bad, None, self.root)
+
     def test_unknown_op_is_refused(self):
         self.assertIn("unknown op", self.refused({"op": "explode"}))
 
