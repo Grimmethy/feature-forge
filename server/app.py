@@ -1,6 +1,6 @@
 """Feature Forge HTTP API (Flask, 127.0.0.1:7466). All persistence goes through server.core.store.
 
-Routes: GET /api/health, GET|POST /api/features, GET /api/features/<slug>/tree,
+Routes: GET / (the single-page UI), GET /api/health, GET|POST /api/features, GET /api/features/<slug>/tree,
 GET|PUT /api/features/<slug>/file?path=, GET /api/features/<slug>/render?path=, GET /api/search?q=
 No timers and no polling: every response is computed when asked.
 """
@@ -13,12 +13,13 @@ import sys
 from pathlib import Path
 
 import markdown as md
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from server.core import store  # noqa: E402
 
 HREF_RE = re.compile(r'href="(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+\.md)"', re.I)
+WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 SNIPPET = 60
 SEARCH_CAP = 200
 
@@ -48,6 +49,10 @@ def create_app(root: Path | None = None) -> Flask:
     @app.errorhandler(store.StoreError)
     def store_error(e: store.StoreError):
         return jsonify({"error": str(e)}), (404 if str(e).startswith("no such") else 400)
+
+    @app.get("/")
+    def index():
+        return send_from_directory(WEB_DIR, "index.html")
 
     @app.get("/api/health")
     def health():
