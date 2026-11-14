@@ -47,6 +47,16 @@ class SyncRouteTests(unittest.TestCase):
         self.assertEqual(rows["FF-1"]["meta"]["took"], "60")
         self.assertFalse(rows["FF-2"]["ticked"])
 
+    def test_pieces_are_ticked_through_the_route_and_the_rows_show_it(self):
+        store.write_file(self.slug, "checklist.md", "# Checklist: x\n\n- [ ] FF-1 Step <!-- filed: 2026-11-14T04:00:00Z deps: -->\n"
+                         "  - [ ] 1a One <!-- task: t-a filed: 2026-11-14T04:00:00Z -->\n  - [ ] 1b Two <!-- task: t-b filed: 2026-11-14T04:00:00Z -->\n", self.root)
+        r = self.client.post(f"/api/features/{self.slug}/sync").get_json()
+        self.assertEqual(r["ticked"], ["FF-1/1a"])
+        self.assertEqual(r["states"]["FF-1/1b"]["state"], "review")
+        rows = {x["id"]: x for x in self.client.get(f"/api/features/{self.slug}/checklist").get_json()}
+        self.assertEqual((rows["FF-1"]["pieceDone"], rows["FF-1"]["pieceTotal"], rows["FF-1"]["ticked"]), (1, 2, False))
+        self.assertEqual(rows["FF-1"]["pieces"][0]["meta"]["took"], "60")
+
     def test_unknown_feature_is_404_and_an_unregistered_repo_is_400(self):
         self.assertEqual(self.client.post("/api/features/nope/sync").status_code, 404)
         store.write_file(self.slug, "request.md", "# Thing\n\nrepo: gamma", self.root)

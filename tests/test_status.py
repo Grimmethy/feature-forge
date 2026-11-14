@@ -109,6 +109,115 @@ class SyncTests(Base):
         self.assertTrue(list((self.root / self.slug / ".history").iterdir()))
 
 
+PIECES_TEXT = """# Checklist: Thing
+
+- [ ] FF-1 Step <!-- premium: true filed: 2026-11-14T04:00:00Z deps: -->
+  Context.
+  - [ ] 1a First <!-- task: tp-a filed: 2026-11-14T04:00:00Z -->
+    own text of the first
+  - [ ] 1b Second <!-- task: tp-b filed: 2026-11-14T04:30:00Z -->
+  - [ ] 1c Third <!-- task: tp-c filed: 2026-11-14T05:00:00Z -->
+- [ ] FF-2 Unfiled pieces <!-- deps: -->
+  - [x] 2a By hand <!-- merged: abc1234 -->
+  - [ ] 2b Not filed
+"""
+
+
+class PieceSyncTests(Base):
+    def setUp(self):
+        super().setUp()
+        store.write_file(self.slug, "checklist.md", PIECES_TEXT, self.root)
+        self.put("done", "tp-a", {"status": "done", "mergedAt": "2026-11-14T04:20:00+00:00"})
+        self.put("review", "tp-b", {"status": "review"})
+        self.put("review", "tp-c", {"status": "review"})
+
+    def piece(self, item, pid):
+        return {p["id"]: p for p in checklist.pieces(self.items()[item])}[pid]
+
+    def merge_all(self):
+        (self.pipe / "queue" / "review" / "tp-b.json").rename(self.pipe / "queue" / "done" / "tp-b.json")
+        (self.pipe / "queue" / "review" / "tp-c.json").rename(self.pipe / "queue" / "done" / "tp-c.json")
+        self.put("done", "tp-b", {"status": "done", "mergedAt": "2026-11-14T05:10:00+00:00"})
+        self.put("done", "tp-c", {"status": "done", "mergedAt": "2026-11-14T06:00:00+00:00"})
+
+    def test_a_merged_pieces_task_ticks_the_piece_with_time_and_minutes_and_keeps_its_text(self):
+        r = status.sync(self.slug, self.root)
+        self.assertEqual(r["ticked"], ["FF-1/1a"])
+        a = self.piece("FF-1", "1a")
+        self.assertTrue(a["ticked"])
+        self.assertEqual((a["meta"]["merged"], a["meta"]["took"], a["meta"]["task"]), ("2026-11-14T04:20:00Z", "20", "tp-a"))
+        self.assertEqual(a["body"], "own text of the first")
+        self.assertFalse(self.items()["FF-1"]["ticked"])
+
+    def test_states_are_keyed_by_the_piece(self):
+        s = status.sync(self.slug, self.root)["states"]
+        self.assertEqual(s["FF-1/1a"]["state"], "merged")
+        self.assertEqual(s["FF-1/1b"], {"state": "review", "status": "review"})
+        self.assertNotIn("FF-1", s)                                  # the step itself has no task
+        self.assertNotIn("FF-2/2b", s)                               # an unfiled piece has none either
+
+    def test_pieces_that_are_not_merged_stay_open(self):
+        status.sync(self.slug, self.root)
+        self.assertFalse(self.piece("FF-1", "1b")["ticked"])
+        self.assertFalse(self.piece("FF-1", "1c")["ticked"])
+        self.assertNotIn("merged", self.piece("FF-1", "1b")["meta"])
+
+    def test_the_step_is_ticked_when_its_last_piece_merges(self):
+        status.sync(self.slug, self.root)
+        self.merge_all()
+        r = status.sync(self.slug, self.root)
+        self.assertEqual(r["ticked"], ["FF-1/1b", "FF-1/1c", "FF-1"])
+        it = self.items()["FF-1"]
+        self.assertTrue(it["ticked"])
+        self.assertEqual(it["meta"]["merged"], "2026-11-14T06:00:00Z")           # the latest piece merge
+
+    def test_the_step_is_not_ticked_while_a_piece_is_open(self):
+        (self.pipe / "queue" / "review" / "tp-b.json").rename(self.pipe / "queue" / "done" / "tp-b.json")
+        self.put("done", "tp-b", {"status": "done", "mergedAt": "2026-11-14T05:10:00+00:00"})
+        status.sync(self.slug, self.root)
+        self.assertFalse(self.items()["FF-1"]["ticked"])
+
+    def test_one_timing_row_per_piece_and_none_for_the_step(self):
+        status.sync(self.slug, self.root)
+        self.merge_all()
+        status.sync(self.slug, self.root)
+        rows = [json.loads(l) for l in (self.root / ".timing.jsonl").read_text().splitlines()]
+        self.assertEqual([r["item"] for r in rows], ["FF-1/1a", "FF-1/1b", "FF-1/1c"])
+        self.assertEqual([r["minutes"] for r in rows], [20, 40, 60])
+        self.assertTrue(all(r["premium"] for r in rows))                         # the step's premium flag
+
+    def test_a_second_sync_changes_nothing(self):
+        status.sync(self.slug, self.root)
+        self.merge_all()
+        status.sync(self.slug, self.root)
+        before, log = store.read_file(self.slug, "checklist.md", self.root), (self.root / ".timing.jsonl").read_text()
+        self.assertEqual(status.sync(self.slug, self.root)["ticked"], [])
+        self.assertEqual((store.read_file(self.slug, "checklist.md", self.root), (self.root / ".timing.jsonl").read_text()), (before, log))
+
+    def test_hand_ticked_and_unfiled_pieces_are_left_alone(self):
+        status.sync(self.slug, self.root)
+        self.assertEqual(self.piece("FF-2", "2a")["meta"], {"merged": "abc1234"})
+        self.assertFalse(self.items()["FF-2"]["ticked"])
+
+    def test_a_vanished_piece_task_is_reported_missing_and_nothing_is_ticked(self):
+        (self.pipe / "queue" / "review" / "tp-b.json").unlink()
+        s = status.sync(self.slug, self.root)["states"]
+        self.assertEqual(s["FF-1/1b"]["state"], "missing")
+        self.assertFalse(self.piece("FF-1", "1b")["ticked"])
+
+    def test_a_piece_finished_without_a_merge_is_not_ticked(self):
+        (self.pipe / "queue" / "review" / "tp-b.json").unlink()
+        self.put("done", "tp-b", {"status": "done"})
+        r = status.sync(self.slug, self.root)
+        self.assertEqual(r["states"]["FF-1/1b"]["state"], "done")
+        self.assertNotIn("FF-1/1b", r["ticked"])
+
+    def test_the_checklist_round_trips_after_a_piece_sync(self):
+        status.sync(self.slug, self.root)
+        text = store.read_file(self.slug, "checklist.md", self.root)
+        self.assertEqual(checklist.render(checklist.parse(text)), text)
+
+
 class FindTaskTests(Base):
     def test_finds_a_drafting_task_in_an_instance_folder(self):
         d = self.pipe / "queue" / "drafting" / "inst1"
