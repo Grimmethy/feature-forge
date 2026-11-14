@@ -79,7 +79,7 @@ class ChecklistRouteTests(unittest.TestCase):
         items = {i["id"]: i for i in checklist.items(checklist.parse(
             (repo_root / "features" / "feature-forge" / "checklist.md").read_text(encoding="utf-8")))}
         counts = {k: (sum(p["ticked"] for p in checklist.pieces(v)), len(checklist.pieces(v))) for k, v in items.items()}
-        self.assertEqual(counts, {"FF-1": (1, 1), "FF-2": (4, 4), "FF-3": (4, 4), "FF-4": (2, 3), "FF-5": (1, 1), "FF-6": (2, 2), "FF-7": (3, 4)})
+        self.assertEqual(counts, {"FF-1": (1, 1), "FF-2": (4, 4), "FF-3": (4, 4), "FF-4": (2, 3), "FF-5": (1, 1), "FF-6": (2, 2), "FF-7": (3, 4), "FF-8": (2, 2), "FF-9": (4, 4)})
         for item in items.values():
             for p in checklist.pieces(item):
                 self.assertEqual(p["ticked"], "merged" in p["meta"], p["title"])      # a ticked piece names its merge commit, an open one does not

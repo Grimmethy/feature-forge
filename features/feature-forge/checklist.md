@@ -26,3 +26,11 @@
   - [x] 7b Create repo button: show the steps, then Create now <!-- merged: 9dccb54 -->
   - [x] 7c Manager decisions: closed outcomes, ledger, dry-run default <!-- merged: 0dde61e -->
   - [ ] 7d Manager worker wiring: trigger, drain, Workers card, plugins.json, 15 minute dry run <!-- needs: owner decision on its home -->
+- [x] FF-8 Sub-pieces visible in the UI <!-- deps: FF-3 manual: true merged: 5aee339 -->
+  - [x] 8a Sub-pieces of checklist items: parsing, route fields and the real sub-pieces <!-- merged: f203f53 -->
+  - [x] 8b Sub-pieces drawn under each step with progress, merge commit and what is needed <!-- merged: 5aee339 -->
+- [x] FF-9 Sub-pieces standard for all Feature Forge work <!-- deps: FF-8 manual: true merged: 26bd9c3 -->
+  - [x] 9a Pieces in the diff operations and the grill protocol <!-- merged: 61f5415 -->
+  - [x] 9b Filing one task per sub-piece <!-- merged: 6f0c0a8 -->
+  - [x] 9c Status sync ticks sub-pieces and the step when its last piece merges <!-- merged: e1eac08 -->
+  - [x] 9d The manager watches sub-piece tasks <!-- merged: 26bd9c3 -->
