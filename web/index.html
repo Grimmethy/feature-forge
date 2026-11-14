@@ -52,18 +52,24 @@ form.nf textarea{min-height:180px}
 #prop{border-top:1px solid var(--line);padding:8px;display:none;max-height:40%;overflow:auto;font-size:13px}
 .pop{padding:4px 0;border-bottom:1px solid var(--line)}.pop.bad{color:var(--muted)}
 .row .acts{margin-left:auto;text-align:right}.warn{color:var(--accent)}.row .acts button{margin-left:4px}.row .acts small{display:block}.tag.lock{color:var(--accent);border-color:var(--accent)}
+.board{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:14px}.board h3{margin:0 0 4px;font-size:14px;color:var(--muted)}
+.bcard{border:1px solid var(--line)!important;border-radius:8px;margin:6px 0;background:var(--panel)}.bcard small{color:var(--muted);display:block}
+.grp{margin:0 0 18px}.grp h3{margin:0 0 4px}.grp .card{border:1px solid var(--line);border-radius:8px;margin:4px 0}
+.graph text{fill:var(--text);font:12px system-ui,sans-serif}.graph .gn rect{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+.graph .gn.done rect{stroke:var(--ok)}.graph .gn.filed rect{stroke:var(--accent)}.graph .edge{fill:none;stroke:var(--muted);stroke-width:1.5}.graph .arrow{fill:var(--muted)}
 form.rf{display:flex;flex-direction:column;gap:8px;max-width:620px}
 form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px;font:inherit}
 </style></head><body>
 <div id="side">
   <header><b>Feature Forge</b><button id="bNew" class="primary" title="Describe a new feature">+ New</button><button id="bRefresh" title="Reload the library">Refresh</button></header>
+  <div style="display:flex;gap:6px;padding:6px 12px 0"><button id="bBoard" title="Every item of every feature in three columns">Board</button><button id="bRepos" title="Features grouped by the repo they are built in">By repo</button></div>
   <input id="q" placeholder="Search every feature (press Enter)">
   <div id="filters"></div>
   <div id="list"></div>
 </div>
 <div id="main">
   <div id="top"><span class="path" id="path">Pick a feature, or create one.</span>
-    <button id="bRepo" style="display:none" title="Which repo is this feature built in?">Choose repo</button><button id="bGrill" class="primary" style="display:none" title="Interview me about this feature">&#128293; Grill</button><button id="bView" class="on" style="display:none">View</button><button id="bEdit" style="display:none">Edit</button><button id="bSave" class="primary" style="display:none">Save</button></div>
+    <button id="bRepo" style="display:none" title="Which repo is this feature built in?">Choose repo</button><button id="bGrill" class="primary" style="display:none" title="Interview me about this feature">&#128293; Grill</button><button id="bGraph" style="display:none" title="The dependency graph of this feature">Graph</button><button id="bView" class="on" style="display:none">View</button><button id="bEdit" style="display:none">Edit</button><button id="bSave" class="primary" style="display:none">Save</button></div>
   <div id="body"><div id="tree"></div><div id="view"></div><textarea id="edit" spellcheck="false"></textarea></div>
 </div>
 <div id="grill">
@@ -97,8 +103,8 @@ function renderList(){
 }
 async function loadLibrary(){features=await api('/api/features');renderFilters();renderList()}
 
-function clearMain(){$('view').style.display='block';$('edit').style.display='none';editing=false}
-function showButtons(on){['bRepo','bGrill','bView','bEdit'].forEach(b=>$(b).style.display=on?'':'none');$('bSave').style.display='none'}
+function clearMain(){$('view').style.maxWidth='';$('view').style.display='block';$('edit').style.display='none';editing=false}
+function showButtons(on){['bRepo','bGrill','bGraph','bView','bEdit'].forEach(b=>$(b).style.display=on?'':'none');$('bSave').style.display='none'}
 let lintArmed=new Set(),taskStates={};
 function actionsHtml(i){const m=i.meta||{};let h='';
   if(!i.ticked){
@@ -176,6 +182,17 @@ document.addEventListener('click',async ev=>{
 $('q').addEventListener('keydown',ev=>{if(ev.key==='Enter')runSearch().catch(e=>toast(e.message))});
 $('bNew').onclick=newForm;$('bRefresh').onclick=()=>loadLibrary().then(()=>{if(cur&&!editing)openFeature(cur,curPath)}).catch(e=>toast(e.message));
 $('bView').onclick=()=>openFile(curPath).catch(e=>toast(e.message));$('bEdit').onclick=()=>startEdit().catch(e=>toast(e.message));$('bSave').onclick=save;
+/* ---- views: board, by repo, graph (read-only, computed when asked) ---- */
+function plainView(title){cur=null;curPath=null;renderList();showButtons(false);$('tree').style.display='none';clearMain();$('path').textContent=title;$('view').style.maxWidth='none'}
+async function showBoard(){plainView('Board');const cols=(await api('/api/views/board')).columns;
+  $('view').innerHTML='<div class="board">'+['Not filed','In flight','Done'].filter(n=>cols[n]).map(name=>`<div class="col" data-col="${esc(name)}"><h3>${esc(name)} (${cols[name].length})</h3>`
+    +(cols[name].map(c=>`<div class="card bcard" data-s="${esc(c.slug)}"><b>${esc(c.id)}</b> ${esc(c.title)}${c.premium?'<span class="tag">premium</span>':''}${c.cloud?'<span class="tag">cloud</span>':''}${c.took?`<span class="tag">took ${esc(c.took)} min</span>`:''}<small>${esc(c.feature)}${c.repo?' · '+esc(c.repo):''}</small></div>`).join('')||'<small>Nothing here.</small>')+'</div>').join('')+'</div>'}
+async function showRepos(){plainView('By repo');const groups=await api('/api/views/repos');
+  $('view').innerHTML=groups.length?groups.map(g=>`<div class="grp" data-repo="${esc(g.repo)}"><h3>${esc(g.repo||'(no repo yet)')} <small>${g.ticked}/${g.total} done</small></h3>`
+    +g.features.map(f=>`<div class="card" data-s="${esc(f.slug)}"><div class="t"><span>${esc(f.title)}</span><span class="chip ${f.status}">${f.status}</span></div><small>${f.ticked}/${f.total} done</small></div>`).join('')+'</div>').join(''):'<p><small>No features yet.</small></p>'}
+async function showGraph(){if(!cur)return;const svg=await (await fetch(`/api/features/${cur}/graph.svg`)).text();clearMain();$('view').style.maxWidth='none';$('path').textContent=`${cur}: graph`;
+  $('view').innerHTML=`<p><small>Green outline: done. Amber: filed. Grey: not filed. Arrows point from a dependency to the item that waits for it.</small></p>`+svg}
+$('bBoard').onclick=()=>showBoard().catch(e=>toast(e.message));$('bRepos').onclick=()=>showRepos().catch(e=>toast(e.message));$('bGraph').onclick=()=>showGraph().catch(e=>toast(e.message));
 /* ---- repo intake: the owner decides; the grill recommends in its first question ---- */
 async function refreshRepo(){
   if(!cur)return;const r=await api(`/api/features/${cur}/repo`);
