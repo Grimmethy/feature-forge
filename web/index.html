@@ -39,6 +39,18 @@ form.nf input,form.nf textarea{background:var(--bg);color:var(--text);border:1px
 form.nf textarea{min-height:180px}
 #toast{position:fixed;right:16px;bottom:16px;background:var(--panel);border:1px solid var(--accent);border-radius:8px;padding:8px 14px;opacity:0;pointer-events:none}
 #toast.show{animation:fade 4s forwards}@keyframes fade{0%,80%{opacity:1}100%{opacity:0}}
+#grill{width:430px;min-width:340px;border-left:1px solid var(--line);background:var(--panel);display:none;flex-direction:column}
+#grill header{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#grill header b{flex:1;font-size:13px}
+#gt{flex:1;overflow:auto;padding:10px 12px;font-size:14px}
+.gm{margin:0 0 12px;padding:8px 10px;border-radius:8px;white-space:pre-wrap;border:1px solid var(--line)}
+.gm.me{background:rgba(217,164,65,.12)}.gm.sys{color:var(--muted);font-size:12px;border:0;padding:2px 0}
+#gin{border-top:1px solid var(--line);padding:8px;display:none;flex-direction:column;gap:6px}
+#gtext{width:100%;min-height:72px;resize:vertical;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit}
+#gin .row2{display:flex;gap:6px;flex-wrap:wrap}
+.repo-opt{padding:6px 0;border-bottom:1px solid var(--line)}.repo-opt small{color:var(--muted);display:block}
+form.rf{display:flex;flex-direction:column;gap:8px;max-width:620px}
+form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px;font:inherit}
 </style></head><body>
 <div id="side">
   <header><b>Feature Forge</b><button id="bNew" class="primary" title="Describe a new feature">+ New</button><button id="bRefresh" title="Reload the library">Refresh</button></header>
@@ -48,8 +60,15 @@ form.nf textarea{min-height:180px}
 </div>
 <div id="main">
   <div id="top"><span class="path" id="path">Pick a feature, or create one.</span>
-    <button id="bView" class="on" style="display:none">View</button><button id="bEdit" style="display:none">Edit</button><button id="bSave" class="primary" style="display:none">Save</button></div>
+    <button id="bRepo" style="display:none" title="Which repo is this feature built in?">Choose repo</button><button id="bGrill" class="primary" style="display:none" title="Interview me about this feature">&#128293; Grill</button><button id="bView" class="on" style="display:none">View</button><button id="bEdit" style="display:none">Edit</button><button id="bSave" class="primary" style="display:none">Save</button></div>
   <div id="body"><div id="tree"></div><div id="view"></div><textarea id="edit" spellcheck="false"></textarea></div>
+</div>
+<div id="grill">
+  <header><b id="gtitle">Grill</b><button id="gclose" title="Hide the panel (the session keeps running)">Hide</button></header>
+  <div id="gt"></div>
+  <div style="padding:8px"><button id="gstart" class="primary">Start the interview</button></div>
+  <div id="gin"><textarea id="gtext" placeholder="Your answers (Ctrl+Enter sends)"></textarea>
+    <div class="row2"><button id="gsend" class="primary">Send</button><button id="gsave" title="Append this conversation to interview.md">Save to interview</button><button id="gend" title="End the session (press twice if it is unsaved)">End</button></div></div>
 </div>
 <div id="toast"></div>
 <script>
@@ -75,7 +94,7 @@ function renderList(){
 async function loadLibrary(){features=await api('/api/features');renderFilters();renderList()}
 
 function clearMain(){$('view').style.display='block';$('edit').style.display='none';editing=false}
-function showButtons(on){['bView','bEdit'].forEach(b=>$(b).style.display=on?'':'none');$('bSave').style.display='none'}
+function showButtons(on){['bRepo','bGrill','bView','bEdit'].forEach(b=>$(b).style.display=on?'':'none');$('bSave').style.display='none'}
 function parseChecklist(text){
   return text.split('\n').map(l=>l.match(/^- \[( |x|X)\] (FF-\d+) (.*?)\s*(?:<!--(.*?)-->)?\s*$/)).filter(Boolean).map(m=>{
     const meta={};let k=null;(m[4]||'').split(/\s+/).filter(Boolean).forEach(t=>{if(t.endsWith(':')){k=t.slice(0,-1);meta[k]=''}else if(k)meta[k]=(meta[k]+' '+t).trim()});
@@ -88,7 +107,7 @@ function checklistHtml(text){
     ${i.meta.deps?`<br><small>after ${esc(i.meta.deps)}</small>`:''}</span></div>`).join('');
 }
 async function openFeature(slug,path){
-  cur=slug;renderList();clearMain();showButtons(true);$('tree').style.display='block';
+  cur=slug;renderList();clearMain();showButtons(true);$('tree').style.display='block';refreshRepo().catch(()=>{});
   const tree=await api(`/api/features/${slug}/tree`);
   $('tree').innerHTML=tree.map(t=>`<div class="f" data-p="${esc(t.path)}"><span>${esc(t.path)}</span><small>${t.words}</small></div>`).join('');
   await openFile(path||(tree.find(t=>t.path==='checklist.md')?'checklist.md':tree[0]&&tree[0].path))
@@ -135,5 +154,58 @@ document.addEventListener('click',async ev=>{
 $('q').addEventListener('keydown',ev=>{if(ev.key==='Enter')runSearch().catch(e=>toast(e.message))});
 $('bNew').onclick=newForm;$('bRefresh').onclick=()=>loadLibrary().then(()=>{if(cur&&!editing)openFeature(cur,curPath)}).catch(e=>toast(e.message));
 $('bView').onclick=()=>openFile(curPath).catch(e=>toast(e.message));$('bEdit').onclick=()=>startEdit().catch(e=>toast(e.message));$('bSave').onclick=save;
+/* ---- repo intake: the owner decides; the grill recommends in its first question ---- */
+async function refreshRepo(){
+  if(!cur)return;const r=await api(`/api/features/${cur}/repo`);
+  $('bRepo').textContent=r.name?`Repo: ${r.name}${r.exists?'':' (new)'}`:'Choose repo';return r}
+async function repoChooser(){
+  if(!cur)return;const repos=await api('/api/repos'),now=await api(`/api/features/${cur}/repo`);clearMain();$('path').textContent=`${cur}: repo`;
+  $('view').innerHTML=`<form class="rf" id="rf"><h2>Which repo is this built in?</h2>
+    <p><small>The interview recommends an existing repo or a new one in its first question. The decision is yours.${now.name?` Now: <b>${esc(now.name)}</b>${now.exists?'':' (new, not created yet)'}.`:''}</small></p>
+    <label>Existing repo<select id="rsel"><option value="">(none)</option>${repos.map(r=>`<option value="${esc(r.name)}"${r.name===now.name?' selected':''}>${esc(r.name)}${r.summary?' - '+esc(r.summary):''}</option>`).join('')}</select></label>
+    <label>or a new repo name<input id="rnew" placeholder="e.g. my-new-tool"></label>
+    <div><button class="primary" type="submit">Use this repo</button></div></form>`;
+  $('rf').onsubmit=async ev=>{ev.preventDefault();const name=$('rnew').value.trim()||$('rsel').value;if(!name){toast('Pick a repo or type a new name');return}
+    try{await post(`/api/features/${cur}/repo`,{name});toast('Repo set: '+name);await refreshRepo();await openFile('request.md')}catch(e){toast(e.message)}}}
+$('bRepo').onclick=()=>repoChooser().catch(e=>toast(e.message));
+
+/* ---- grill panel ---- */
+let G=null,gUnsaved=false,gEnding=false;
+function gadd(cls,text){const d=document.createElement('div');d.className='gm '+cls;d.textContent=text;$('gt').appendChild(d);$('gt').scrollTop=1e9;return d}
+function gReset(){G=null;gUnsaved=false;gEnding=false;$('gt').innerHTML='';$('gin').style.display='none';$('gstart').parentElement.style.display=''}
+function openGrill(){
+  if(!cur){toast('Open a feature first');return}
+  if(G&&G.slug!==cur)gReset();
+  $('grill').style.display='flex';$('gtitle').textContent=`Grill: ${cur}`;
+  if(!G&&!$('gt').children.length)gadd('sys','Starts an interview about this feature. The model can read the repos but cannot change anything. Nothing is saved until you press "Save to interview".')}
+async function gstream(url,body){
+  const bub=gadd('','');$('gsend').disabled=true;
+  try{
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+    if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||r.status)}
+    const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){const{value,done}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});
+      let i;while((i=buf.indexOf('\n\n'))>=0){const fr=buf.slice(0,i);buf=buf.slice(i+2);
+        for(const ln of fr.split('\n')){if(!ln.startsWith('data:'))continue;let ev;try{ev=JSON.parse(ln.slice(5))}catch{continue}
+          if(ev.type==='chunk'){bub.textContent+=ev.text;$('gt').scrollTop=1e9}
+          else if(ev.type==='error')gadd('sys','Error: '+ev.error)}}}
+    if(!bub.textContent)bub.textContent='(no reply)';gUnsaved=true;
+  }catch(e){bub.className='gm sys';bub.textContent='Error: '+e.message}
+  $('gsend').disabled=false}
+$('bGrill').onclick=()=>openGrill();
+$('gclose').onclick=()=>{$('grill').style.display='none'};
+$('gstart').onclick=async()=>{
+  try{$('gstart').disabled=true;const m=await post('/api/grill/start',{feature:cur});
+    G={sid:m.id,slug:cur};$('gstart').parentElement.style.display='none';$('gin').style.display='flex';
+    gadd('sys','Session started. Waiting for the first round...');await gstream(`/api/grill/${G.slug}/${G.sid}/begin`);
+  }catch(e){gadd('sys','Could not start: '+e.message)}finally{$('gstart').disabled=false}};
+$('gsend').onclick=async()=>{const t=$('gtext').value.trim();if(!t||!G)return;$('gtext').value='';gadd('me',t);await gstream(`/api/grill/${G.slug}/${G.sid}/message`,{message:t})};
+$('gtext').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter')$('gsend').click()});
+$('gsave').onclick=async()=>{if(!G)return;
+  try{const r=await post(`/api/grill/${G.slug}/${G.sid}/save`,{});gUnsaved=false;gadd('sys',`Saved ${r.words} words to ${r.path}`);await loadLibrary();if(cur===G.slug)await openFeature(cur,'interview.md')}
+  catch(e){gadd('sys','Save failed: '+e.message)}};
+$('gend').onclick=async()=>{if(!G)return;
+  if(gUnsaved&&!gEnding){gEnding=true;gadd('sys','Not saved yet. Press End again to discard, or Save to interview first.');return}
+  await post(`/api/grill/${G.slug}/${G.sid}/end`,{}).catch(()=>{});gReset();gadd('sys','Session ended.')};
 loadLibrary().catch(e=>toast(e.message));
 </script></body></html>
