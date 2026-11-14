@@ -158,6 +158,7 @@ def create_app(root: Path | None = None) -> Flask:
                          "deps": checklist._deps(i), "body": "\n".join(checklist.plain_body(i)), "meta": i["meta"],
                          "pieces": checklist.pieces(i), "pieceDone": sum(p["ticked"] for p in checklist.pieces(i)),
                          "pieceTotal": len(checklist.pieces(i)),
+                         "pieceUnfiled": sum(1 for p in checklist.pieces(i) if not p["ticked"] and not p["meta"].get("task")),
                          "lint": filing.lint(i["title"] + "\n" + "\n".join(i["body"]))}
                         for i in checklist.items(entries)])
 
@@ -196,7 +197,10 @@ def create_app(root: Path | None = None) -> Flask:
         accept = (request.get_json(silent=True) or {}).get("acceptLint")
         if accept is not None and not isinstance(accept, bool):
             return jsonify({"error": "acceptLint must be true or false"}), 400
-        return jsonify(filing.file_item(slug, item_id, bool(accept), froot()))
+        piece = (request.get_json(silent=True) or {}).get("piece")
+        if piece is not None and not isinstance(piece, str):
+            return jsonify({"error": "piece must be a piece label such as 4c"}), 400
+        return jsonify(filing.file_item(slug, item_id, bool(accept), froot(), piece))
 
     @app.post("/api/features/<slug>/checklist/<item_id>/flag")
     def checklist_flag(slug, item_id):

@@ -183,6 +183,45 @@ class PieceOpTests(Base):
         self.assertIn("at most 26", self.refused({"op": "change", "id": "FF-5", "pieces": ["one too many"]}))
 
 
+class UpdatePieceTests(unittest.TestCase):
+    TEXT = "# C\n\n- [ ] FF-1 P <!-- deps: -->\n  Intro.\n  - [ ] 1a One\n    own text\n  - [x] 1b Two <!-- merged: abc1234 -->\n  Outro.\n"
+
+    def run_update(self, *a, **k):
+        entries = cl.parse(self.TEXT)
+        item = cl.items(entries)[0]
+        ok = cl.update_piece(item, *a, **k)
+        return ok, item, cl.render(entries)
+
+    def test_meta_is_merged_into_the_pieces_comment(self):
+        ok, item, text = self.run_update("1b", meta={"took": "7"})
+        self.assertTrue(ok)
+        self.assertIn("  - [x] 1b Two <!-- merged: abc1234 took: 7 -->", text)
+
+    def test_a_piece_with_no_comment_gets_one_and_keeps_its_own_text(self):
+        ok, item, text = self.run_update("1a", meta={"task": "t-1", "filed": "2026-11-14T01:00:00Z"})
+        self.assertIn("  - [ ] 1a One <!-- task: t-1 filed: 2026-11-14T01:00:00Z -->\n    own text\n", text)
+        self.assertEqual(cl.pieces(item)[0]["body"], "own text")
+
+    def test_ticking_sets_the_box_and_nothing_else(self):
+        ok, item, text = self.run_update("1a", ticked=True)
+        self.assertIn("  - [x] 1a One\n    own text\n", text)
+        ok, item, text = self.run_update("1b", ticked=False)
+        self.assertIn("  - [ ] 1b Two <!-- merged: abc1234 -->", text)
+
+    def test_only_the_named_piece_and_no_other_line_changes(self):
+        ok, item, text = self.run_update("1a", meta={"task": "t-1"})
+        self.assertEqual(text.replace(" <!-- task: t-1 -->", ""), self.TEXT)
+
+    def test_an_unknown_piece_changes_nothing(self):
+        ok, item, text = self.run_update("1z", meta={"task": "t"})
+        self.assertFalse(ok)
+        self.assertEqual(text, self.TEXT)
+
+    def test_an_unlabelled_piece_cannot_be_addressed(self):
+        entries = cl.parse("# C\n\n- [ ] FF-1 P <!-- deps: -->\n  - [ ] fixes things\n")
+        self.assertFalse(cl.update_piece(cl.items(entries)[0], "", meta={"task": "t"}))
+
+
 class AddTests(Base):
     def test_add_gets_the_next_id_and_keeps_the_rest_untouched(self):
         self.apply({"op": "add", "title": "Fifth", "body": "line one\nline two", "deps": ["FF-4"], "premium": True})

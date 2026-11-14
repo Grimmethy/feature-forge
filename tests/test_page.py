@@ -84,6 +84,11 @@ class PageTests(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, body)
 
+    def test_pieces_can_be_filed_and_show_their_tasks(self):
+        for needle in ("i.pieceUnfiled>0", "r.pieces.map", "The Agent Manager task for this piece", "taskStates[i.id+'/'+p.id]"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, SCRIPT)
+
     def test_a_refused_op_cannot_be_ticked(self):
         self.assertIn("r.ok?'checked':'disabled'", SCRIPT)
 

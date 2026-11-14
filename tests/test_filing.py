@@ -38,9 +38,9 @@ class Base(unittest.TestCase):
 
         def fake_run(cmd, **kw):
             self.calls.append((cmd, kw))
-            if self.fail:
-                return SimpleNamespace(returncode=1, stdout="", stderr="boom")
             n = len(self.calls)
+            if self.fail or n == self.fail_on_call:
+                return SimpleNamespace(returncode=1, stdout="", stderr="boom")
             return SimpleNamespace(returncode=0, stdout=f"queued adhoc task: /p/alpha-pipeline/queue/adhoc/adhoc-task-{n}.json\n", stderr="")
 
         def fake_open(req, timeout=None):
@@ -49,6 +49,7 @@ class Base(unittest.TestCase):
                 raise OSError("down")
             return io.BytesIO(b"{}")
         self.fail = self.post_fail = False
+        self.fail_on_call = None
         saved = (filing.runner, filing._urlopen, os.environ.get("FEATUREFORGE_PROJECTS"))
         filing.runner, filing._urlopen = fake_run, fake_open
         os.environ["FEATUREFORGE_PROJECTS"] = str(reg)
@@ -173,6 +174,156 @@ class FileItemTests(Base):
         store.write_file(self.slug, "request.md", "# Thing\n\nrepo: gamma", self.root)
         with self.assertRaisesRegex(filing.FilingError, "not a registered"):
             self.file("FF-2")
+
+
+PIECES_CHECKLIST = """# Checklist: Thing
+
+- [x] FF-1 By hand <!-- manual: true -->
+- [ ] FF-2 Step with pieces <!-- premium: true deps: FF-1 -->
+  Context line about the step.
+  - [ ] 2a First piece
+    Do the first thing in core.py.
+  - [ ] 2b Second piece
+    Do the second thing in app.py.
+  - [ ] 2c Third piece
+- [ ] FF-3 After the step <!-- deps: FF-2 -->
+"""
+
+
+class PieceFilingTests(Base):
+    def setUp(self):
+        super().setUp()
+        store.write_file(self.slug, "checklist.md", PIECES_CHECKLIST, self.root)
+
+    def pieces(self, item="FF-2"):
+        return {p["id"]: p for p in checklist.pieces(self.items()[item])}
+
+    def deps_of(self, call):
+        cmd = call[0]
+        return cmd[cmd.index("--depends-on") + 1] if "--depends-on" in cmd else None
+
+    def test_an_item_with_pieces_files_one_task_per_piece_in_a_chain(self):
+        r = self.file("FF-2")
+        self.assertEqual([x["piece"] for x in r["pieces"]], ["2a", "2b", "2c"])
+        self.assertEqual(r["task"], "adhoc-task-3")
+        self.assertEqual([self.deps_of(c) for c in self.calls], [None, "adhoc-task-1", "adhoc-task-2"])       # FF-1 was done by hand
+        self.assertEqual([c[0][c[0].index("--title") + 1] for c in self.calls], ["FF-2/2a First piece", "FF-2/2b Second piece", "FF-2/2c Third piece"])
+
+    def test_each_piece_line_is_stamped_and_the_item_is_locked_without_an_item_task(self):
+        self.file("FF-2")
+        ps = self.pieces()
+        self.assertEqual([ps[k]["meta"]["task"] for k in "2a 2b 2c".split()], ["adhoc-task-1", "adhoc-task-2", "adhoc-task-3"])
+        self.assertTrue(all(p["meta"]["filed"].endswith("Z") for p in ps.values()))
+        it = self.items()["FF-2"]
+        self.assertNotIn("task", it["meta"])
+        self.assertTrue(checklist.is_locked(it))
+        self.assertEqual(ps["2a"]["body"], "Do the first thing in core.py.")                       # the piece text survived the stamp
+
+    def test_the_task_text_is_the_pieces_own_text_with_the_step_for_context(self):
+        seen = []
+        orig = filing.runner
+
+        def spy(cmd, **kw):
+            seen.append(json.loads(Path(cmd[cmd.index("--prompt-context-file") + 1]).read_text())["rawText"])
+            return orig(cmd, **kw)
+        filing.runner = spy
+        self.file("FF-2")
+        self.assertIn("Do the first thing in core.py.", seen[0])
+        self.assertIn("part of FF-2 (Step with pieces): Context line about the step.", seen[0])
+        self.assertNotIn("Do the second thing", seen[0])
+        self.assertIn("comes after 2a (First piece)", seen[1])
+        self.assertIn("(no further detail in the checklist piece)", seen[2])
+        self.assertTrue(all(filing.STANDARD_CLAUSE in t for t in seen))
+
+    def test_the_steps_premium_flag_reaches_every_piece_task(self):
+        r = self.file("FF-2")
+        self.assertTrue(r["premium"])
+        self.assertEqual(len(self.posts), 3)
+        self.assertEqual(sorted(u.split("/api/task-anywhere/")[1].split("/")[0] for u, _ in self.posts), ["adhoc-task-1", "adhoc-task-2", "adhoc-task-3"])
+
+    def test_one_piece_can_be_filed_alone_but_only_in_order(self):
+        with self.assertRaisesRegex(filing.FilingError, "file 2a first"):
+            self.file("FF-2", piece="2b")
+        self.assertEqual(self.calls, [])
+        self.assertEqual([x["piece"] for x in self.file("FF-2", piece="2a")["pieces"]], ["2a"])
+        self.file("FF-2", piece="2b")
+        self.assertEqual(self.deps_of(self.calls[1]), "adhoc-task-1")
+        with self.assertRaisesRegex(filing.FilingError, "2a is already filed as adhoc-task-1"):
+            self.file("FF-2", piece="2a")
+
+    def test_filing_again_files_only_what_is_left_and_chains_to_the_last_filed_piece(self):
+        self.file("FF-2", piece="2a")
+        r = self.file("FF-2")
+        self.assertEqual([x["piece"] for x in r["pieces"]], ["2b", "2c"])
+        self.assertEqual(self.deps_of(self.calls[1]), "adhoc-task-1")
+        with self.assertRaisesRegex(filing.FilingError, "no unfiled pieces"):
+            self.file("FF-2")
+
+    def test_a_piece_added_to_a_filed_item_can_be_filed(self):
+        self.file("FF-2")
+        checklist.apply(self.slug, {"ops": [{"op": "change", "id": "FF-2", "pieces": ["Late piece"]}]}, None, self.root)
+        r = self.file("FF-2")
+        self.assertEqual([x["piece"] for x in r["pieces"]], ["2d"])
+        self.assertEqual(self.deps_of(self.calls[-1]), "adhoc-task-3")
+
+    def test_a_step_waiting_on_a_step_with_pieces_waits_for_its_last_piece(self):
+        with self.assertRaisesRegex(filing.FilingError, "file FF-2 first"):
+            self.file("FF-3")
+        self.file("FF-2")
+        self.calls.clear()
+        self.file("FF-3")
+        self.assertEqual(self.deps_of(self.calls[0]), "adhoc-task-3")
+
+    def test_pieces_done_by_hand_add_no_dependency(self):
+        store.write_file(self.slug, "checklist.md", PIECES_CHECKLIST.replace("- [ ] 2a First piece", "- [x] 2a First piece <!-- merged: abc1234 -->"), self.root)
+        r = self.file("FF-2")
+        self.assertEqual([x["piece"] for x in r["pieces"]], ["2b", "2c"])
+        self.assertIsNone(self.deps_of(self.calls[0]))
+        self.assertEqual(self.deps_of(self.calls[1]), "adhoc-task-1")
+
+    def test_a_done_earlier_piece_means_the_step_dependencies_are_met_too(self):
+        text = ("# Checklist: Thing\n\n- [ ] FF-1 Base <!-- task: t-base filed: 2026-11-14T00:00:00Z deps: -->\n"
+                "- [ ] FF-2 Step <!-- deps: FF-1 -->\n  - [x] 2a Done <!-- merged: abc1234 -->\n  - [ ] 2b Next\n    text\n")
+        store.write_file(self.slug, "checklist.md", text, self.root)
+        self.file("FF-2")
+        self.assertIsNone(self.deps_of(self.calls[0]))
+        store.write_file(self.slug, "checklist.md", text.replace("- [x] 2a Done <!-- merged: abc1234 -->", "- [ ] 2a Done"), self.root)
+        self.calls.clear()
+        self.file("FF-2")
+        self.assertEqual(self.deps_of(self.calls[0]), "t-base")                  # the first piece of a fresh step waits for what the step waits for
+
+    def test_polling_language_in_a_piece_is_refused_before_anything_is_queued(self):
+        store.write_file(self.slug, "checklist.md", PIECES_CHECKLIST.replace("Do the second thing in app.py.", "Check it every 5 minutes."), self.root)
+        with self.assertRaisesRegex(filing.FilingError, "polling language"):
+            self.file("FF-2")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(len(self.file("FF-2", accept_lint=True)["pieces"]), 3)
+
+    def test_a_failure_midway_keeps_what_was_filed_and_says_so(self):
+        self.fail_on_call = 2
+        with self.assertRaisesRegex(filing.FilingError, r"could not be queued: boom \(filed so far: adhoc-task-1\)"):
+            self.file("FF-2")
+        ps = self.pieces()
+        self.assertEqual(ps["2a"]["meta"]["task"], "adhoc-task-1")
+        self.assertNotIn("task", ps["2b"]["meta"])
+        self.fail_on_call = None
+        self.assertEqual([x["piece"] for x in self.file("FF-2")["pieces"]], ["2b", "2c"])
+
+    def test_piece_arguments_are_checked(self):
+        with self.assertRaisesRegex(filing.FilingError, "no such piece 2z"):
+            self.file("FF-2", piece="2z")
+        with self.assertRaisesRegex(filing.FilingError, "FF-3 has no pieces"):
+            self.file("FF-3", piece="3a")
+        with self.assertRaisesRegex(filing.FilingError, "no such piece"):
+            filing.record_text(self.slug, "FF-2", self.root, "9z")
+
+    def test_premium_on_a_filed_step_changes_every_unfinished_piece_task(self):
+        self.file("FF-2")
+        self.posts.clear()
+        filing.set_flag(self.slug, "FF-2", "premium", False, self.root)
+        self.assertEqual(len(self.posts), 3)
+        self.assertTrue(all(body == {"enabled": False} for _, body in self.posts))
+        self.assertEqual(self.items()["FF-2"]["meta"]["premium"], "false")
 
 
 class FlagTests(Base):
