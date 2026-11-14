@@ -73,6 +73,17 @@ class PageTests(unittest.TestCase):
         self.assertIn("$('rcgo').disabled=false", SCRIPT)                # and usable again after an error
         self.assertIn("(already done)", SCRIPT)
 
+    def test_sub_pieces_are_drawn_under_each_checklist_row(self):
+        for needle in ("piecesHtml", "data-piece", "i.pieceDone", "i.pieceTotal", "pieces</span>", "tag merged", "tag need", "needs: "):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, SCRIPT)
+
+    def test_piece_text_is_escaped(self):
+        body = SCRIPT[SCRIPT.index("function piecesHtml"):SCRIPT.index("function checklistHtml")]
+        for needle in ("esc(p.id)", "esc(p.title)", "esc(m.merged)", "esc(m.needs)"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, body)
+
     def test_a_refused_op_cannot_be_ticked(self):
         self.assertIn("r.ok?'checked':'disabled'", SCRIPT)
 
