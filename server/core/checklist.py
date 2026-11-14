@@ -10,6 +10,8 @@ Filed items are locked: they can be changed (the item then carries 'changed: <da
 filing"; its task id and filing stamp are never touched) but never split or removed. preview() says what each op would do;
 apply() writes the file only when every selected op is valid (all or nothing) and keeps a history copy through the store.
 A line is '- [ ] FF-3 Title <!-- key: value ... -->' optionally followed by indented body lines.
+Pieces: an indented body line of the form '- [x] 3a Title <!-- merged: abc1234 -->' is a SUB-PIECE of the item (shown under it in the
+page with its own tick and merge commit). Pieces are ordinary body lines, so the editor, the diff ops and byte-stable rendering keep working.
 """
 from __future__ import annotations
 
@@ -77,6 +79,29 @@ def is_locked(item: dict) -> bool:
 
 def _deps(item: dict) -> list[str]:
     return [d for d in re.split(r"[,\s]+", item["meta"].get("deps", "")) if d]
+
+
+PIECE_RE = re.compile(r"^- \[( |x|X)\] (.+?)\s*(?:<!--(.*?)-->)?\s*$")
+
+
+PIECE_LABEL_RE = re.compile(r"^(\d+[a-z]*\d*)\s+(.+)$")        # a leading label like 4, 4a or 3b1 is the piece's id
+
+
+def pieces(item: dict) -> list[dict]:
+    """The sub-pieces of an item: [{'ticked', 'id', 'title', 'meta'}] from its '- [x] 4a title <!-- key: value -->' body lines, in order."""
+    out = []
+    for line in item["body"]:
+        m = PIECE_RE.match(line)
+        if m:
+            label = PIECE_LABEL_RE.match(m.group(2).strip())
+            out.append({"ticked": m.group(1) != " ", "id": label.group(1) if label else "",
+                        "title": label.group(2) if label else m.group(2).strip(), "meta": store._parse_meta(m.group(3))})
+    return out
+
+
+def plain_body(item: dict) -> list[str]:
+    """The item's body lines that are not sub-pieces."""
+    return [line for line in item["body"] if not PIECE_RE.match(line)]
 
 
 def next_id(entries: list[dict]) -> str:

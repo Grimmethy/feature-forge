@@ -60,6 +60,64 @@ class ParseRenderTests(Base):
         self.assertFalse(cl.is_locked(items["FF-2"]))
 
 
+PIECES = """# Checklist: Pieces
+
+- [ ] FF-1 Parent <!-- deps: -->
+  Some plain text about the parent.
+  - [x] 1a First piece <!-- merged: abc1234 -->
+  - [ ] 1b Second piece <!-- needs: owner decision -->
+  - [X] 1c Third piece, no comment
+  More plain text after the pieces.
+- [ ] FF-2 Child <!-- deps: FF-1 -->
+  not a piece: - [x] inside a sentence
+"""
+
+
+class PieceTests(unittest.TestCase):
+    def item(self, text=PIECES, n=0):
+        return cl.items(cl.parse(text))[n]
+
+    def test_pieces_are_read_in_order_with_ticks_titles_and_comments(self):
+        ps = cl.pieces(self.item())
+        self.assertEqual([p["title"] for p in ps], ["First piece", "Second piece", "Third piece, no comment"])
+        self.assertEqual([p["id"] for p in ps], ["1a", "1b", "1c"])
+        self.assertEqual([p["ticked"] for p in ps], [True, False, True])
+        self.assertEqual(ps[0]["meta"], {"merged": "abc1234"})
+        self.assertEqual(ps[1]["meta"], {"needs": "owner decision"})
+        self.assertEqual(ps[2]["meta"], {})
+
+    def test_plain_body_keeps_only_the_other_lines(self):
+        self.assertEqual(cl.plain_body(self.item()), ["Some plain text about the parent.", "More plain text after the pieces."])
+
+    def test_a_sentence_containing_a_checkbox_is_not_a_piece(self):
+        child = self.item(n=1)
+        self.assertEqual(cl.pieces(child), [])
+        self.assertEqual(cl.plain_body(child), ["not a piece: - [x] inside a sentence"])
+
+    def test_a_piece_without_a_label_has_an_empty_id_and_keeps_its_whole_text(self):
+        item = cl.items(cl.parse("# C\n\n- [ ] FF-1 P <!-- deps: -->\n  - [ ] Third piece alone\n  - [x] 12b2 Odd label\n  - [ ] fixes the lowercase case\n  - [ ] 7 Plain number\n"))[0]
+        self.assertEqual([(p["id"], p["title"]) for p in cl.pieces(item)],
+                         [("", "Third piece alone"), ("12b2", "Odd label"), ("", "fixes the lowercase case"), ("7", "Plain number")])
+
+    def test_an_item_with_no_body_has_no_pieces(self):
+        self.assertEqual(cl.pieces(cl.items(cl.parse(FIXTURE))[2]), [])
+
+    def test_pieces_do_not_change_the_item_list_or_the_round_trip(self):
+        self.assertEqual([i["id"] for i in cl.items(cl.parse(PIECES))], ["FF-1", "FF-2"])
+        self.assertEqual(cl.render(cl.parse(PIECES)), PIECES)
+
+    def test_editing_an_item_keeps_a_change_ops_body_exactly(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        slug = store.create_feature("P", "x", root)
+        store.write_file(slug, "checklist.md", PIECES, root)
+        cl.apply(slug, {"ops": [{"op": "change", "id": "FF-2", "title": "Child renamed"}]}, None, root)
+        text = store.read_file(slug, "checklist.md", root)
+        self.assertIn("  - [x] 1a First piece <!-- merged: abc1234 -->", text)
+        self.assertEqual(len(cl.pieces(cl.items(cl.parse(text))[0])), 3)
+
+
 class AddTests(Base):
     def test_add_gets_the_next_id_and_keeps_the_rest_untouched(self):
         self.apply({"op": "add", "title": "Fifth", "body": "line one\nline two", "deps": ["FF-4"], "premium": True})
