@@ -18,7 +18,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from . import checklist, grill, store
+from . import checklist, grill, parallel_files, store
 
 AM_CORE = Path(os.environ.get("FEATUREFORGE_AM_CORE", "/media/model-cache/github/agent-manager"))
 AM_URL = os.environ.get("FEATUREFORGE_AM_URL", "http://localhost:7420")
@@ -221,6 +221,11 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
         raise FilingError("polling language in this item (" + ", ".join(warnings) + "): reword it to use a trigger, or accept the warning")
     premium = it["meta"].get("premium") == "true"
     out = {"id": item_id, "pieces": [], "premium": premium, "warnings": warnings}
+    _deps_map: dict[str, set[str]] = {}
+    for _q in checklist.pieces(it):
+        _after = _q["meta"].get("after", "").strip()
+        if _after and _after != "none":
+            _deps_map[_q["id"]] = {a for a in _after.split() if a}
     for p in todo:
         after_meta = p["meta"].get("after", "").strip()
         if after_meta:
@@ -247,6 +252,15 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
                 deps = []                                           # earlier pieces were done by hand: nothing to wait for
             else:
                 deps = list(dep_tasks)                              # the first piece waits for what the step waits for
+        p_files = parallel_files.files_of("\n".join(p["body"]) if isinstance(p.get("body"), list) else (p["body"] or ""))
+        for prev in todo[:todo.index(p)]:
+            prev_files = parallel_files.files_of("\n".join(prev["body"]) if isinstance(prev.get("body"), list) else (prev["body"] or ""))
+            if not p_files or not prev_files:
+                continue
+            if parallel_files.depends_transitively(p["id"], prev["id"], _deps_map):
+                continue
+            for shared in sorted(p_files & prev_files):
+                warnings.append(f"{p['id']} and {prev['id']} both name {shared}; they can run in parallel and may conflict")
         try:
             task = _queue_task(project, f"{item_id}/{p['id']} {p['title']}", record_text(slug, item_id, root, p["id"]), f"feature-forge:{slug}/{item_id}/{p['id']}", deps)
         except FilingError as e:
