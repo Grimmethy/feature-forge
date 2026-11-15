@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import store
 
-META_ORDER = ("task", "premium", "cloud", "deps", "filed", "manual", "merged", "changed")
+META_ORDER = ("task", "premium", "cloud", "deps", "after", "filed", "manual", "merged", "changed")
 TITLE_CAP = 120
 BODY_CAP = 6000
 OPS = ("add", "change", "split", "remove")
