@@ -325,6 +325,111 @@ class PieceFilingTests(Base):
         self.assertTrue(all(body == {"enabled": False} for _, body in self.posts))
         self.assertEqual(self.items()["FF-2"]["meta"]["premium"], "false")
 
+    def test_independent_pieces_with_after_none_get_no_inter_piece_deps(self):
+        text = ("# Checklist: Thing\n\n- [ ] FF-1 Base <!-- task: t-base filed: 2026-11-14T00:00:00Z -->\n"
+                "- [ ] FF-2 Step <!-- deps: FF-1 -->\n"
+                "  - [ ] 2a First <!-- after: none -->\n"
+                "    Do the first thing.\n"
+                "  - [ ] 2b Second <!-- after: none -->\n"
+                "    Do the second thing.\n"
+                "  - [ ] 2c Third <!-- after: none -->\n"
+                "    Do the third thing.\n")
+        store.write_file(self.slug, "checklist.md", text, self.root)
+        r = self.file("FF-2")
+        self.assertEqual([x["piece"] for x in r["pieces"]], ["2a", "2b", "2c"])
+        self.assertEqual([self.deps_of(c) for c in self.calls], ["t-base", "t-base", "t-base"])
+
+    def test_after_with_a_piece_label_cites_that_piece_only(self):
+        text = ("# Checklist: Thing\n\n- [ ] FF-1 Base <!-- task: t-base filed: 2026-11-14T00:00:00Z -->\n"
+                "- [ ] FF-2 Step <!-- deps: FF-1 -->\n"
+                "  - [ ] 2a First <!-- after: none -->\n"
+                "    Do the first thing.\n"
+                "  - [ ] 2b Second <!-- after: 2a -->\n"
+                "    Do the second thing.\n"
+                "  - [ ] 2c Third <!-- after: 2a -->\n"
+                "    Do the third thing.\n")
+        store.write_file(self.slug, "checklist.md", text, self.root)
+        self.file("FF-2")
+        self.assertEqual(self.deps_of(self.calls[0]), "t-base")
+        self.assertEqual(self.deps_of(self.calls[1]), "adhoc-task-1")
+        self.assertEqual(self.deps_of(self.calls[2]), "adhoc-task-1")
+
+    def test_after_with_multiple_labels_cites_all_of_them(self):
+        text = ("# Checklist: Thing\n\n- [ ] FF-1 Base <!-- task: t-base filed: 2026-11-14T00:00:00Z -->\n"
+                "- [ ] FF-2 Step <!-- deps: FF-1 -->\n"
+                "  - [ ] 2a First\n"
+                "    Do the first thing.\n"
+                "  - [ ] 2b Second\n"
+                "    Do the second thing.\n"
+                "  - [ ] 2c Third <!-- after: 2a 2b -->\n"
+                "    Do the third thing.\n")
+        store.write_file(self.slug, "checklist.md", text, self.root)
+        self.file("FF-2")
+        self.assertEqual(self.deps_of(self.calls[0]), "t-base")
+        self.assertEqual(self.deps_of(self.calls[1]), "adhoc-task-1")
+        self.assertEqual(self.deps_of(self.calls[2]), "adhoc-task-1,adhoc-task-2")
+
+    def test_after_referencing_an_unfiled_piece_raises(self):
+        text = ("# Checklist: Thing\n\n- [ ] FF-1 Base <!-- task: t-base filed: 2026-11-14T00:00:00Z -->\n"
+                "- [ ] FF-2 Step <!-- deps: FF-1 -->\n"
+                "  - [ ] 2a First <!-- after: 2b -->\n"
+                "    Do the first thing.\n"
+                "  - [ ] 2b Second\n"
+                "    Do the second thing.\n")
+        store.write_file(self.slug, "checklist.md", text, self.root)
+        with self.assertRaisesRegex(filing.FilingError, "piece 2b in FF-2/2a has no task yet"):
+            self.file("FF-2")
+        self.assertEqual(self.calls, [])
+
+    def test_after_referencing_an_unknown_piece_raises(self):
+        text = ("# Checklist: Thing\n\n- [ ] FF-1 Base <!-- task: t-base filed: 2026-11-14T00:00:00Z -->\n"
+                "- [ ] FF-2 Step <!-- deps: FF-1 -->\n"
+                "  - [ ] 2a First <!-- after: 9z -->\n"
+                "    Do the first thing.\n")
+        store.write_file(self.slug, "checklist.md", text, self.root)
+        with self.assertRaisesRegex(filing.FilingError, "piece 9z in FF-2/2a refers to an unknown piece"):
+            self.file("FF-2")
+        self.assertEqual(self.calls, [])
+
+    def test_no_after_keeps_the_chain(self):
+        r = self.file("FF-2")
+        self.assertEqual([x["piece"] for x in r["pieces"]], ["2a", "2b", "2c"])
+        self.assertEqual([self.deps_of(c) for c in self.calls], [None, "adhoc-task-1", "adhoc-task-2"])
+
+    def test_task_text_shows_declared_after_peers(self):
+        text = ("# Checklist: Thing\n\n- [ ] FF-1 Base <!-- task: t-base filed: 2026-11-14T00:00:00Z -->\n"
+                "- [ ] FF-2 Step <!-- deps: FF-1 -->\n"
+                "  - [ ] 2a First\n"
+                "    Do the first thing.\n"
+                "  - [ ] 2b Second <!-- after: 2a -->\n"
+                "    Do the second thing.\n")
+        store.write_file(self.slug, "checklist.md", text, self.root)
+        seen = []
+        orig = filing.runner
+        def spy(cmd, **kw):
+            seen.append(json.loads(Path(cmd[cmd.index("--prompt-context-file") + 1]).read_text())["rawText"])
+            return orig(cmd, **kw)
+        filing.runner = spy
+        self.file("FF-2")
+        self.assertNotIn("comes after", seen[0])
+        self.assertIn("comes after 2a (First)", seen[1])
+        filing.runner = orig
+
+    def test_after_round_trips_through_checklist_parse_and_render(self):
+        text = ("# Checklist: Thing\n\n- [ ] FF-2 Step\n"
+                "  - [ ] 2a First <!-- after: 2b none -->\n"
+                "    Do the first thing.\n"
+                "  - [ ] 2b Second <!-- after: none -->\n"
+                "    Do the second thing.\n")
+        entries = checklist.parse(text)
+        rendered = checklist.render(entries)
+        self.assertIn("after: 2b none", rendered)
+        self.assertIn("after: none", rendered)
+        reparsed = checklist.parse(rendered)
+        ps = checklist.pieces(checklist.items(reparsed)[0])
+        self.assertEqual(ps[0]["meta"]["after"], "2b none")
+        self.assertEqual(ps[1]["meta"]["after"], "none")
+
 
 class FlagTests(Base):
     def flag(self, item, flag, value):
