@@ -119,7 +119,21 @@ def parse_checklist(slug: str, root: Path | None = None) -> list[dict]:
         return []
 
 
-def derive_status(items: list[dict]) -> str:
+def _grill_gate(feature_dir: Path, slug: str) -> bool:
+    """True when request.md carries 'grill: required' and grill_done(slug) is still False."""
+    try:
+        text = (feature_dir / "request.md").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    if not any(line.strip() == "grill: required" for line in text.splitlines()):
+        return False
+    from .grill import grill_done  # lazy import: grill.py is owned by subtask 1/6
+    return not grill_done(slug)
+
+
+def derive_status(items: list[dict], slug: str | None = None, feature_dir: Path | None = None) -> str:
+    if slug is not None and feature_dir is not None and _grill_gate(feature_dir, slug):
+        return "Grilling"
     if not items:
         return "Grilling"
     if all(i["ticked"] for i in items):
@@ -164,6 +178,6 @@ def list_features(root: Path | None = None) -> list[dict]:
         title, repo = _request_info(d.name, root)
         done, total = progress(items)
         updated = max((f.stat().st_mtime for f in d.glob("*.md")), default=d.stat().st_mtime)
-        out.append({"slug": d.name, "title": title, "status": derive_status(items), "ticked": done,
+        out.append({"slug": d.name, "title": title, "status": derive_status(items, slug=d.name, feature_dir=d), "ticked": done,
                     "total": total, "repo": repo, "updated": updated})
     return out
