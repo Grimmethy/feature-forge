@@ -19,7 +19,7 @@ import markdown as md
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from server.core import checklist, filing, grill, repo_create, status, store, views  # noqa: E402
+from server.core import checklist, filing, grill, proposals, repo_create, status, store, views  # noqa: E402
 
 HREF_RE = re.compile(r'href="(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+\.md)"', re.I)
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -274,6 +274,49 @@ def create_app(root: Path | None = None) -> Flask:
     @app.post("/api/grill/<slug>/<sid>/end")
     def grill_end(slug, sid):
         return jsonify(grill.end(slug, sid, froot()))
+
+
+    @app.post("/api/proposals/<repo>/<id>/dismiss")
+    def dismiss_proposal(repo, id):
+        """Dismiss a proposal: append a dismissal record and return the dismissal key."""
+        body = request.get_json(silent=True) or {}
+        why = str((body.get("why") or "")).strip()
+        if not why:
+            return jsonify({"error": "'why' is required"}), 400
+
+        # Look up the proposal in the scout file
+        proposals_dir = os.path.expanduser("~/.local/state/pipeline-ops/reposcout/proposals")
+        scout_file = os.path.join(proposals_dir, f"{repo}.json")
+
+        if not os.path.exists(scout_file):
+            return jsonify({"error": "not found"}), 404
+
+        try:
+            with open(scout_file, "r", encoding="utf-8") as f:
+                scout_data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return jsonify({"error": "not found"}), 404
+
+        # Find the proposal with matching id
+        proposal = None
+        for p in scout_data.get("proposals", []):
+            if p.get("id") == id:
+                proposal = p
+                break
+
+        if proposal is None:
+            return jsonify({"error": "not found"}), 404
+
+        title = proposal.get("title", "")
+        if not title:
+            return jsonify({"error": "proposal has no title"}), 400
+
+        # Compute dismissal key and append
+        now = datetime.utcnow()
+        key = proposals.dismissal_key(title, why)
+        proposals.append_dismissal(proposals_dir, repo, id, title, why, now)
+
+        return jsonify({"key": key}), 200
 
     return app
 
