@@ -71,6 +71,13 @@ class BuildPromptTests(unittest.TestCase):
         out = build_answer_prompt(QUESTION, RULES_TEXT, [])
         self.assertIn(JSON_OUTPUT_INSTRUCTION, out)
 
+    def test_prompt_states_citation_cap(self):
+        # Pin the literal text: the constant-based test above cannot notice the sentence being edited out.
+        sentence = 'An answer with no citation will be treated as level 2 at most.'
+        out = build_answer_prompt(QUESTION, RULES_TEXT, [])
+        self.assertIn(sentence, out)
+        self.assertLess(out.index('"citations"'), out.index(sentence))
+
     def test_no_precedent_rule_present(self):
         out = build_answer_prompt(QUESTION, RULES_TEXT, [])
         self.assertIn(NO_PRECEDENT_RULE, out)
