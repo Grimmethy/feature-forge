@@ -200,6 +200,24 @@ def list_sessions(slug: str, root: Path | None = None) -> list[dict]:
                   key=lambda m: m.get("started", ""), reverse=True)
 
 
+def grill_done(slug: str, root: Path | None = None) -> bool:
+    """True if any .grill/<sid>.json for slug has saved=True. Evaluated on demand."""
+    try:
+        d = store.feature_dir(slug, root) / ".grill"
+    except store.StoreError:
+        return False
+    if not d.is_dir():
+        return False
+    for p in d.glob("*.json"):
+        try:
+            meta = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if meta.get("saved") is True:
+            return True
+    return False
+
+
 def start(slug: str, node: str = "feature", account: str | None = None, root: Path | None = None) -> dict:
     """Open a read-only Claude chat session for this feature (node: 'feature' or a checklist item id like FF-3)."""
     store.feature_dir(slug, root)
@@ -283,6 +301,8 @@ def format_transcript(entries: list[dict]) -> str:
 
 def save_to_interview(slug: str, sid: str, root: Path | None = None) -> dict:
     meta = load_meta(slug, sid, root)
+    if "slug" not in meta:
+        meta["slug"] = slug
     body = format_transcript(transcript(sid))
     if not body:
         raise GrillError("nothing to save yet")
