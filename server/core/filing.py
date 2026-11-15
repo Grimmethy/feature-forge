@@ -95,7 +95,20 @@ def record_text(slug: str, item_id: str, root: Path | None = None, piece_id: str
         parts = [f"{item_id}/{piece_id} of feature '{slug}': {piece['title']}", f"Repo: {repo}.",
                  piece["body"] or "(no further detail in the checklist piece)",
                  f"This piece is part of {item_id} ({it['title']})" + (f": {context}" if context else ".")]
-        if idx:
+        after_meta = piece["meta"].get("after", "").strip()
+        if after_meta:
+            after_labels = [a for a in after_meta.split() if a]
+            if after_labels == ["none"]:
+                pass
+            else:
+                peers = []
+                for label in after_labels:
+                    peer = next((p for p in ps if p["id"] == label), None)
+                    if peer:
+                        peers.append(f"{label} ({peer['title']})")
+                if peers:
+                    parts.append(f"This piece comes after {', '.join(peers)}.")
+        elif idx:
             parts.append(f"This piece comes after {ps[idx - 1]['id']} ({ps[idx - 1]['title']}), which is this task's dependsOn.")
         if plan:
             parts.append("Feature plan (for context; do only this piece):\n" + plan)
@@ -209,15 +222,31 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
     premium = it["meta"].get("premium") == "true"
     out = {"id": item_id, "pieces": [], "premium": premium, "warnings": warnings}
     for p in todo:
-        now = checklist.pieces(it)                              # re-read: the pieces filed a moment ago carry their task ids now
-        before = now[:[q["id"] for q in now].index(p["id"])]
-        prev = next((q["meta"]["task"] for q in reversed(before) if q["meta"].get("task")), None)
-        if prev:
-            deps = [prev]                                       # pieces chain: each waits for the one before it
-        elif before:
-            deps = []                                           # earlier pieces were done by hand: nothing to wait for
+        after_meta = p["meta"].get("after", "").strip()
+        if after_meta:
+            after_labels = [a for a in after_meta.split() if a]
+            if after_labels == ["none"]:
+                deps = list(dep_tasks)
+            else:
+                deps = []
+                now = checklist.pieces(it)                              # re-read: pieces filed a moment ago carry their task ids now
+                for label in after_labels:
+                    peer = next((q for q in now if q["id"] == label), None)
+                    if peer is None:
+                        raise FilingError(f"piece {label} in {item_id}/{p['id']} refers to an unknown piece")
+                    if not peer["meta"].get("task"):
+                        raise FilingError(f"piece {label} in {item_id}/{p['id']} has no task yet: file it first")
+                    deps.append(peer["meta"]["task"])
         else:
-            deps = list(dep_tasks)                              # the first piece waits for what the step waits for
+            now = checklist.pieces(it)                              # re-read: the pieces filed a moment ago carry their task ids now
+            before = now[:[q["id"] for q in now].index(p["id"])]
+            prev = next((q["meta"]["task"] for q in reversed(before) if q["meta"].get("task")), None)
+            if prev:
+                deps = [prev]                                       # pieces chain: each waits for the one before it
+            elif before:
+                deps = []                                           # earlier pieces were done by hand: nothing to wait for
+            else:
+                deps = list(dep_tasks)                              # the first piece waits for what the step waits for
         try:
             task = _queue_task(project, f"{item_id}/{p['id']} {p['title']}", record_text(slug, item_id, root, p["id"]), f"feature-forge:{slug}/{item_id}/{p['id']}", deps)
         except FilingError as e:

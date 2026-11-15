@@ -1,12 +1,35 @@
 """Static checks of web/index.html: the repo chooser and grill panel are wired to the routes, and the page stays free of
-timers and blocking dialogs. Standard library only, so it runs under a bare python3. The real-browser test is
+timers and blocking dialogs. Standard library only, so it runs under a bare python3; the node parse check needs node on PATH. The real-browser test is
 tests/browser_grill_panel.mjs."""
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
 PAGE = (Path(__file__).resolve().parents[1] / "web" / "index.html").read_text(encoding="utf-8")
 SCRIPT = PAGE.split("<script>")[-1].split("</script>")[0]
+
+
+def inline_scripts(html):
+    """Bodies of every <script> block without a src= attribute, in document order."""
+    found = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, re.S | re.I)
+    return [body for attrs, body in found if "src=" not in attrs.lower()]
+
+
+def node_check(body):
+    """Run `node --check` on one script body; returns (returncode, stderr)."""
+    tmp = tempfile.mkdtemp(prefix="page-script-")
+    try:
+        path = os.path.join(tmp, "page-script.js")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(body)
+        proc = subprocess.run(["node", "--check", path], capture_output=True, text=True)
+        return proc.returncode, proc.stderr
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 class PageTests(unittest.TestCase):
@@ -94,6 +117,34 @@ class PageTests(unittest.TestCase):
 
     def test_buttons_are_hidden_outside_a_feature(self):
         self.assertRegex(SCRIPT, r"function showButtons\(on\)\{\['bRepo','bGrill'")
+
+
+class ParsePageTests(unittest.TestCase):
+    def require_node(self):
+        if shutil.which("node") is None:
+            self.fail("node is required to check the page script")
+
+    def test_every_inline_script_parses(self):
+        self.require_node()
+        blocks = inline_scripts(PAGE)
+        self.assertGreater(len(blocks), 0, "no inline script found; check failed vacuously")
+        for i, body in enumerate(blocks):
+            with self.subTest(block=i):
+                code, err = node_check(body)
+                self.assertEqual(code, 0, f"inline script {i} does not parse:\n{err}")
+
+    def test_a_broken_first_inline_script_is_caught(self):
+        self.require_node()
+        html = ('<script>function (</script>'
+                '<script>var ok = 1;</script>'
+                '<script src="x.js">not read</script>')
+        blocks = inline_scripts(html)
+        self.assertEqual(len(blocks), 2)
+        self.assertNotEqual(node_check(blocks[0])[0], 0)
+        self.assertEqual(node_check(blocks[1])[0], 0)
+
+    def test_the_proposals_view_button_is_present(self):
+        self.assertIn('id="bProposals"', PAGE)
 
 
 if __name__ == "__main__":
