@@ -276,6 +276,41 @@ def create_app(root: Path | None = None) -> Flask:
         return jsonify(grill.end(slug, sid, froot()))
 
 
+    @app.get("/api/proposals")
+    def list_proposals():
+        """Return all proposals across repos, ranked by value desc then name asc."""
+        proposals_dir = os.path.expanduser("~/.local/state/pipeline-ops/reposcout/proposals")
+        if not os.path.isdir(proposals_dir):
+            return jsonify([]), 200
+
+        # Load all scout files
+        repos = []
+        for fname in os.listdir(proposals_dir):
+            if not fname.endswith(".json"):
+                continue
+            fpath = os.path.join(proposals_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                continue
+            repos.append(data)
+
+        # Load dismissals
+        dismissed_keys = proposals.load_dismissals(proposals_dir)
+
+        # Mark dismissed proposals
+        for repo_data in repos:
+            repo_name = repo_data.get("repo", fname.replace(".json", ""))
+            for prop in repo_data.get("proposals", []):
+                key = proposals.dismissal_key(prop.get("title", ""), prop.get("why", ""))
+                prop["dismissed"] = (repo_name, prop.get("id", ""), key) in dismissed_keys
+
+        # Sort by value desc, then name asc
+        repos.sort(key=lambda r: (-r.get("value", 0), r.get("repo", "")))
+
+        return jsonify(repos), 200
+
     @app.post("/api/proposals/<repo>/<id>/dismiss")
     def dismiss_proposal(repo, id):
         """Dismiss a proposal: append a dismissal record and return the dismissal key."""

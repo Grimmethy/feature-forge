@@ -60,10 +60,17 @@ form.nf textarea{min-height:180px}
 .graph .gn.done rect{stroke:var(--ok)}.graph .gn.filed rect{stroke:var(--accent)}.graph .edge{fill:none;stroke:var(--muted);stroke-width:1.5}.graph .arrow{fill:var(--muted)}
 form.rf{display:flex;flex-direction:column;gap:8px;max-width:620px}
 form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px;font:inherit}
+.prop-grp{margin:0 0 18px}.prop-grp h3{margin:0 0 6px;font-size:15px}.prop-grp h3 small{color:var(--muted);font-weight:400}
+.prop-item{padding:7px 0;border-top:1px solid var(--line)}.prop-item.dismissed{color:var(--muted)}.prop-item.dismissed .prop-why{text-decoration:line-through}
+.prop-why{margin:4px 0;font-size:14px}.prop-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px}
+.prop-meta .chip{font-size:10px;padding:1px 6px}.prop-evidence{margin:4px 0 0;padding:0;color:var(--muted);font-size:12px}
+.prop-evidence li{list-style:none}.prop-evidence li::before{content:"📎 "}
+.prop-outward{font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid var(--accent);color:var(--accent);background:rgba(217,164,65,.1)}
+.prop-acts{margin-top:4px;text-align:right}.prop-acts button{margin-left:4px;font-size:12px;padding:3px 8px}
 </style></head><body>
 <div id="side">
   <header><b>Feature Forge</b><button id="bNew" class="primary" title="Describe a new feature">+ New</button><button id="bRefresh" title="Reload the library">Refresh</button></header>
-  <div style="display:flex;gap:6px;padding:6px 12px 0"><button id="bBoard" title="Every item of every feature in three columns">Board</button><button id="bRepos" title="Features grouped by the repo they are built in">By repo</button></div>
+  <div style="display:flex;gap:6px;padding:6px 12px 0"><button id="bBoard" title="Every item of every feature in three columns">Board</button><button id="bRepos" title="Features grouped by the repo they are built in">By repo</button><button id="bProposals" title="Scouted proposals ranked by value">Proposals</button></div>
   <input id="q" placeholder="Search every feature (press Enter)">
   <div id="filters"></div>
   <div id="list"></div>
@@ -166,6 +173,17 @@ async function runSearch(){
 }
 document.addEventListener('click',async ev=>{
   const gb=ev.target.closest('[data-grill]');if(gb){itemGrill(gb.dataset.grill);return}
+  const db=ev.target.closest('[data-dismiss]');
+  if(db){const[r,id]=db.dataset.dismiss.split('|');try{
+    await post(`/api/proposals/${r}/${id}/dismiss`,{why:'Dismissed'});
+    toast('Proposal dismissed');await showProposals()
+  }catch(e){toast('Dismiss failed: '+e.message)}return}
+  const sb=ev.target.closest('[data-start]');
+  if(sb){const[r,id]=sb.dataset.start.split('|');try{
+    const res=await post(`/api/proposals/${r}/${id}/start`,{});
+    if(res.url){sb.outerHTML=`<a href="${esc(res.url)}" target="_blank" rel="noopener">Open feature →</a>`}
+    else{toast('Start request succeeded (no URL returned)')}
+  }catch(e){toast('Start failed: '+e.message)}return}
   const fb=ev.target.closest('[data-file]'),pb=ev.target.closest('[data-flag]');
   if(fb||pb){try{
     if(pb){await post(`/api/features/${cur}/checklist/${pb.dataset.id}/flag`,{flag:pb.dataset.flag,value:pb.dataset.val==='true'})}
@@ -197,7 +215,50 @@ async function showRepos(){plainView('By repo');const groups=await api('/api/vie
     +g.features.map(f=>`<div class="card" data-s="${esc(f.slug)}"><div class="t"><span>${esc(f.title)}</span><span class="chip ${f.status}">${f.status}</span></div><small>${f.ticked}/${f.total} done</small></div>`).join('')+'</div>').join(''):'<p><small>No features yet.</small></p>'}
 async function showGraph(){if(!cur)return;const svg=await (await fetch(`/api/features/${cur}/graph.svg`)).text();clearMain();$('view').style.maxWidth='none';$('path').textContent=`${cur}: graph`;
   $('view').innerHTML=`<p><small>Green outline: done. Amber: filed. Grey: not filed. Arrows point from a dependency to the item that waits for it.</small></p>`+svg}
-$('bBoard').onclick=()=>showBoard().catch(e=>toast(e.message));$('bRepos').onclick=()=>showRepos().catch(e=>toast(e.message));$('bGraph').onclick=()=>showGraph().catch(e=>toast(e.message));
+
+async function showProposals(){
+  plainView('Proposals');
+  try{
+    const repos=await api('/api/proposals');
+    if(!repos.length){$('view').innerHTML='<p><small>No proposals yet.</small></p>';return}
+    let html='<div class="prop-list">';
+    for(const repo of repos){
+      const props=repo.proposals||[];
+      const dismissed=props.filter(p=>p.dismissed);
+      const active=props.filter(p=>!p.dismissed);
+      html+=`<div class="prop-grp" data-repo="${esc(repo.repo)}">
+        <h3>${esc(repo.repo||'(unnamed)')} <small>value: ${repo.value??0} · scouted ${repo.scoutedAt||'?'}</small></h3>
+        <p><small>${esc(repo.summary||'')}</small></p>`;
+      if(!props.length){html+='<p><small>No proposals.</small></p>'}
+      else{
+        html+='<ul class="prop-items">';
+        for(const p of active){html+=renderPropItem(p,repo.repo,false)}
+        for(const p of dismissed){html+=renderPropItem(p,repo.repo,true)}
+        html+='</ul>'
+      }
+      html+='</div>'
+    }
+    html+='</div>';
+    $('view').innerHTML=html
+  }catch(e){toast('Failed to load proposals: '+e.message)}
+}
+
+function renderPropItem(p,repo,dismissed){
+  const evidence=(p.evidence||[]).map(e=>`<li>${esc(e)}</li>`).join('');
+  const outward=p.outward?'<span class="chip prop-outward">outward</span>':'';
+  let startBtn='';
+  if(p.outward&&!dismissed){
+    startBtn=`<button class="start-btn" data-start="${esc(repo)}|${esc(p.id)}" title="Start this proposal">Start</button>`
+  }
+  const acts=dismissed?'':`<div class="prop-acts">${startBtn}<button data-dismiss="${esc(repo)}|${esc(p.id)}" title="Dismiss this proposal">Dismiss</button></div>`;
+  return `<li class="prop-item ${dismissed?'dismissed':''}">
+    <div class="t"><b>${esc(p.title)}</b><span class="chip">${esc(p.kind||'')}</span> ${outward}</div>
+    <div class="prop-meta"><span class="chip">${esc(p.effort||'')}</span></div>
+    ${p.why?`<div class="prop-why">${esc(p.why)}</div>`:''}
+    ${evidence?`<ul class="prop-evidence">${evidence}</ul>`:''}
+    ${acts}</li>`
+}
+$('bBoard').onclick=()=>showBoard().catch(e=>toast(e.message));$('bRepos').onclick=()=>showRepos().catch(e=>toast(e.message));$('bGraph').onclick=()=>showGraph().catch(e=>toast(e.message));$('bProposals').onclick=()=>showProposals().catch(e=>toast(e.message));
 /* ---- repo intake: the owner decides; the grill recommends in its first question ---- */
 async function refreshRepo(){
   if(!cur)return;const r=await api(`/api/features/${cur}/repo`);
