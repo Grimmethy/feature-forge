@@ -40,6 +40,14 @@ class FilingError(RuntimeError):
     pass
 
 
+class NotRegisteredError(FilingError):
+    """A repo name that matches no registered Agent Manager project. Carries only the repo name."""
+
+    def __init__(self, repo: str):
+        self.repo = repo
+        super().__init__(f"{repo} is not a registered Agent Manager project (create it first)")
+
+
 def projects_path() -> Path:
     return Path(os.environ.get("FEATUREFORGE_PROJECTS", str(AM_CORE / "projects.json")))
 
@@ -61,7 +69,7 @@ def project_for(repo_name: str) -> dict:
             if not (p.get("repoRoot") and p.get("pipelineDir") and p.get("domainsPath")):
                 raise FilingError(f"project {repo_name} is registered without a pipeline")
             return p
-    raise FilingError(f"{repo_name} is not a registered Agent Manager project (create it first)")
+    raise NotRegisteredError(repo_name)
 
 
 def _item(slug: str, item_id: str, root: Path | None):

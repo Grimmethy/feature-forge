@@ -22,6 +22,8 @@ from . import filing, grill
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$")
 QUEUE_DIRS = ("adhoc", "pending", "drafting", "review", "approved", "blocked", "needs-clarification", "awaiting-confirm", "coordinating", "done")
 runner = subprocess.run           # tests replace this
+_list_dir = os.listdir            # tests replace this (directory listing seam for unregistered_repos)
+_unreg_cache = {}                 # root path -> ((root_mtime_ns, projects_mtime_ns), sorted names)
 
 
 class RepoCreateError(RuntimeError):
@@ -48,6 +50,32 @@ def _registered(name: str) -> bool:
         return any(name in (p.get("label"), Path(p.get("repoRoot", "")).name) for p in json.loads(filing.projects_path().read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return False
+
+
+def _registered_names() -> set:
+    """Every label and repo folder name in projects.json."""
+    projects = json.loads(filing.projects_path().read_text(encoding="utf-8"))
+    names = set()
+    for p in projects:
+        for v in (p.get("label"), Path(p.get("repoRoot", "")).name):
+            if v:
+                names.add(v)
+    return names
+
+
+def unregistered_repos(root) -> list[str]:
+    """Sorted names under root that are not registered and do not match grill.SKIP_REPO.
+    Memoised on the mtime_ns of root and projects.json, so an unchanged pair skips the listing.
+    The key covers root's own entries and projects.json only, not the contents of nested directories."""
+    key = str(root)
+    stat_key = (os.stat(root).st_mtime_ns, os.stat(filing.projects_path()).st_mtime_ns)
+    cached = _unreg_cache.get(key)
+    if cached is not None and cached[0] == stat_key:
+        return list(cached[1])
+    registered = _registered_names()
+    result = sorted(n for n in _list_dir(root) if n not in registered and not grill.SKIP_REPO.search(n))
+    _unreg_cache[key] = (stat_key, result)
+    return list(result)
 
 
 def plan(name: str, repos: Path | None = None) -> list[dict]:
