@@ -2,7 +2,7 @@
 
 Routes: GET / (the single-page UI), GET /api/health, GET|POST /api/features, GET /api/features/<slug>/tree,
 GET|PUT /api/features/<slug>/file?path=, GET /api/features/<slug>/render?path=, GET /api/search?q=,
-GET /api/repos, GET|POST /api/features/<slug>/repo, GET /api/features/<slug>/checklist, POST .../checklist/preview|apply,
+GET /api/repos, GET /api/repos/unregistered, GET|POST /api/features/<slug>/repo, GET /api/features/<slug>/checklist, POST .../checklist/preview|apply,
 POST /api/features/<slug>/checklist/<id>/file|flag, POST /api/features/<slug>/sync, GET /api/repos/plan?name=, POST /api/repos/create, GET /api/views/board, GET /api/views/repos, GET /api/features/<slug>/graph.svg, POST /api/grill/<slug>/<sid>/proposal, and the grill routes: POST /api/grill/start,
 GET /api/grill/<slug>/sessions, POST /api/grill/<slug>/<sid>/begin|message (server-sent events), /save and /end.
 No timers and no polling: every response is computed when asked.
@@ -81,6 +81,10 @@ def create_app(root: Path | None = None) -> Flask:
     @app.errorhandler(repo_create.RepoCreateError)
     def repo_create_error(e: repo_create.RepoCreateError):
         return jsonify({"error": str(e)}), 400
+
+    @app.errorhandler(filing.NotRegisteredError)
+    def not_registered_error(e: filing.NotRegisteredError):
+        return jsonify({"code": "not-registered", "repo": e.repo, "steps": repo_create.plan(e.repo), "error": str(e)}), 409
 
     @app.errorhandler(grill.GrillError)
     def grill_error(e: grill.GrillError):
@@ -229,7 +233,12 @@ def create_app(root: Path | None = None) -> Flask:
 
     @app.get("/api/repos")
     def repos():
-        return jsonify(grill.repo_index())
+        registered = repo_create._registered_names()
+        return jsonify([{**r, "registered": r.get("name") in registered} for r in grill.repo_index()])
+
+    @app.get("/api/repos/unregistered")
+    def repos_unregistered():
+        return jsonify(repo_create.unregistered_repos(grill.repos_root()))
 
     @app.get("/api/features/<slug>/repo")
     def get_repo(slug):
