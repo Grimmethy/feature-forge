@@ -70,6 +70,21 @@ class TabScriptSourceTest(unittest.TestCase):
     def test_every_interpolated_value_goes_through_the_escaper(self):
         self.assertEqual(len(re.findall(r"escapeAttr\(", self.src)), 2)
 
+    def test_gitignore_ignores_feature_data(self):
+        with open(os.path.join(ROOT, ".gitignore"), encoding="utf-8") as f:
+            lines = [line.strip() for line in f]
+        self.assertIn("features/", lines)
+
+    def test_feature_data_is_not_tracked_by_git(self):
+        try:
+            check = subprocess.run(["git", "-C", ROOT, "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True)
+        except OSError:
+            self.skipTest("git is not installed")
+        if check.returncode != 0 or check.stdout.strip() != "true":
+            self.skipTest("not inside a git checkout")
+        out = subprocess.run(["git", "-C", ROOT, "ls-files", "features"], capture_output=True, text=True, check=True)
+        self.assertEqual(out.stdout.strip(), "")
+
 
 @unittest.skipUnless(NODE, "node is not installed")
 class TabScriptBehaviourTest(unittest.TestCase):
@@ -108,6 +123,11 @@ class TabScriptBehaviourTest(unittest.TestCase):
             with self.subTest(url=url):
                 r = run_tab(plugins=[{"name": "featureforge", "url": url}])
                 self.assertEqual(r["src"], want)
+
+    def test_remote_entry_is_selected_by_name_not_position(self):
+        r = run_tab(plugins=[{"name": "mailroom", "url": "http://100.96.112.78:7464"}, {"name": "featureforge", "url": "http://100.80.1.14:7466"}])
+        self.assertNotIn(ENSURE, r["calls"])
+        self.assertEqual(r["src"], "http://100.80.1.14:7466/")
 
     def test_other_plugins_urls_are_ignored(self):
         self.assertLocal(run_tab(plugins=[{"name": "mailroom", "url": "http://100.96.112.78:7464"}]))
