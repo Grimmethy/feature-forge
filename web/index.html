@@ -89,6 +89,7 @@ form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px s
   <div id="prop"></div>
 </div>
 <div id="toast"></div>
+<script src="feature-counts.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const STATUSES=['Grilling','Planned','Filed','Building','Done'];
@@ -99,11 +100,12 @@ async function api(url,opt){const r=await fetch(url,opt);const j=await r.json().
 const post=(url,body,method)=>api(url,{method:method||'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
 function renderFilters(){
-  const counts={All:features.length};STATUSES.forEach(s=>counts[s]=features.filter(f=>f.status===s).length);
-  $('filters').innerHTML=['All',...STATUSES].map(s=>`<button data-f="${s}" class="${s===filter?'on':''}">${s} ${counts[s]}</button>`).join('');
+  const counts=featureCounts(features,STATUSES);
+  const pills=['All',...STATUSES].concat(counts.Other>0?['Other']:[]);
+  $('filters').innerHTML=pills.map(s=>`<button data-f="${s}" class="${s===filter?'on':''}">${s} ${counts[s]}</button>`).join('');
 }
 function renderList(){
-  const rows=features.filter(f=>filter==='All'||f.status===filter);
+  const rows=features.filter(f=>filter==='All'||(filter==='Other'?!STATUSES.includes(f.status):f.status===filter));
   $('list').innerHTML=rows.length?rows.map(f=>{const pct=f.total?Math.round(100*f.ticked/f.total):0;
     return `<div class="card ${f.slug===cur?'on':''}" data-s="${esc(f.slug)}"><div class="t"><span>${esc(f.title)}</span><span class="chip ${f.status}">${f.status}</span></div>
     <small>${f.ticked}/${f.total} done${f.repo?' · '+esc(f.repo):''}</small><div class="bar"><i style="width:${pct}%"></i></div></div>`}).join('')
