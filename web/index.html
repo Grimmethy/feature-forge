@@ -59,7 +59,8 @@ form.nf textarea{min-height:180px}
 .graph text{fill:var(--text);font:12px system-ui,sans-serif}.graph .gn rect{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
 .graph .gn.done rect{stroke:var(--ok)}.graph .gn.filed rect{stroke:var(--accent)}.graph .edge{fill:none;stroke:var(--muted);stroke-width:1.5}.graph .arrow{fill:var(--muted)}
 form.rf{display:flex;flex-direction:column;gap:8px;max-width:620px}
-form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px;font:inherit}
+form.rf label{display:flex;flex-direction:column;min-width:0}
+form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px;font:inherit;width:100%;max-width:100%;min-width:0;box-sizing:border-box}
 .prop-grp{margin:0 0 18px}.prop-grp h3{margin:0 0 6px;font-size:15px}.prop-grp h3 small{color:var(--muted);font-weight:400}
 .prop-item{padding:7px 0;border-top:1px solid var(--line)}.prop-item.dismissed{color:var(--muted)}.prop-item.dismissed .prop-why{text-decoration:line-through}
 .prop-why{margin:4px 0;font-size:14px}.prop-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px}
@@ -267,7 +268,7 @@ async function repoChooser(){
   if(!cur)return;const repos=await api('/api/repos'),now=await api(`/api/features/${cur}/repo`);clearMain();$('path').textContent=`${cur}: repo`;
   $('view').innerHTML=`<form class="rf" id="rf"><h2>Which repo is this built in?</h2>
     <p><small>The interview recommends an existing repo or a new one in its first question. The decision is yours.${now.name?` Now: <b>${esc(now.name)}</b>${now.exists?'':' (new, not created yet)'}.`:''}</small></p>
-    <label>Existing repo<select id="rsel"><option value="">(none)</option>${repos.map(r=>`<option value="${esc(r.name)}"${r.name===now.name?' selected':''}>${esc(r.name)}${r.summary?' - '+esc(r.summary):''}</option>`).join('')}</select></label>
+    <label>Existing repo<select id="rsel"><option value="">(none)</option>${repos.map(r=>`<option value="${esc(r.name)}"${r.name===now.name?' selected':''}${r.summary?' title="'+esc(r.summary)+'"':''}>${esc(r.name)}</option>`).join('')}</select></label>
     <label>or a new repo name<input id="rnew" placeholder="e.g. my-new-tool"></label>
     <div><button class="primary" type="submit">Use this repo</button></div></form>`;
   if(now.name&&!now.exists)repoCreateBox(now.name);

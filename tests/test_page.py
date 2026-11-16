@@ -60,6 +60,15 @@ class PageTests(unittest.TestCase):
     def test_the_owner_decides_the_repo_wording(self):
         self.assertIn("The decision is yours", SCRIPT)
 
+    def test_the_repo_picker_select_has_a_width_bound_and_summaries_are_not_option_text(self):
+        rule = re.search(r"form\.rf select[^{]*\{([^}]*)\}", PAGE)
+        self.assertIsNotNone(rule, "no CSS rule for form.rf select")
+        self.assertRegex(rule.group(1), r"max-width:\s*100%")
+        self.assertRegex(rule.group(1), r"box-sizing:\s*border-box")
+        self.assertNotIn("' - '+esc(r.summary)", SCRIPT)
+        self.assertIn("${esc(r.name)}</option>", SCRIPT)
+        self.assertIn("title=\"'+esc(r.summary)", SCRIPT)
+
     def test_the_checklist_rows_and_proposal_review_are_wired(self):
         for ident in ("grev", "prop"):
             self.assertIn(f'id="{ident}"', PAGE)
