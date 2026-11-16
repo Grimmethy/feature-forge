@@ -334,8 +334,16 @@ function showProp(){
   const box=$('prop');box.style.display='block';
   box.innerHTML='<b>Proposed checklist changes</b>'+PROP.proposal.ops.map((op,n)=>{const r=PROP.preview[n]||{};
     return `<label class="pop ${r.ok?'':'bad'}" data-op="${n}"><input type="checkbox" ${r.ok?'checked':'disabled'}> ${esc(r.summary||op.op)}${r.ok?'':' (refused)'}</label>`}).join('')
-    +'<div class="row2" style="margin-top:6px"><button id="gapply" class="primary">Apply selected</button></div>';
-  $('gapply').onclick=applyProp}
+    +'<div class="row2" style="margin-top:6px"><button id="gapply" class="primary">Apply selected</button>'
+    +(PROP.preview.some(r=>r&&r.needsNumbering)?'<button id="gnumber">Number items</button>':'')+'</div>';
+  $('gapply').onclick=applyProp;
+  const nb=$('gnumber');if(nb)nb.onclick=numberItems}
+async function numberItems(){
+  try{await post(`/api/features/${G.slug}/checklist/number`,{});
+    gadd('sys','Checklist items numbered.');
+    PROP=await post(`/api/grill/${G.slug}/${G.sid}/proposal`,{});showProp();
+    await loadLibrary();if(cur===G.slug)await openFeature(cur,'checklist.md')}
+  catch(e){gadd('sys','Numbering failed: '+e.message)}}
 async function applyProp(){
   const only=[...document.querySelectorAll('#prop .pop')].filter(l=>l.querySelector('input').checked).map(l=>+l.dataset.op);
   if(!only.length){toast('Nothing selected');return}

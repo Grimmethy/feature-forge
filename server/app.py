@@ -226,6 +226,10 @@ def create_app(root: Path | None = None) -> Flask:
             return jsonify({"error": "only must be a list of operation numbers"}), 400
         return jsonify(checklist.apply(slug, body.get("proposal"), only, froot()))
 
+    @app.post("/api/features/<slug>/checklist/number")
+    def checklist_number(slug):
+        return jsonify(checklist.number_checklist(slug, froot()))
+
     @app.post("/api/grill/<slug>/<sid>/proposal")
     def grill_proposal(slug, sid):
         proposal = grill.proposal_from_session(slug, sid, froot())

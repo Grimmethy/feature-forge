@@ -165,6 +165,46 @@ def next_id(entries: list[dict]) -> str:
     return f"FF-{max(nums, default=0) + 1}"
 
 
+IDLESS_RE = re.compile(r"^- \[( |x|X)\] (\S.*)$")          # a top-level checkbox line with no FF-n id
+
+
+def _idless_match(line: str):
+    line = line.rstrip("\r")
+    if store.ITEM_RE.match(line.rstrip()):
+        return None
+    return IDLESS_RE.match(line)
+
+
+def has_idless(entries: list[dict]) -> bool:
+    """True when the checklist has item lines ('- [ ] text') that carry no FF id."""
+    return any(e["kind"] == "raw" and _idless_match(e["line"]) for e in entries)
+
+
+def number_items(text: str) -> tuple[str, list[str]]:
+    """Give every id-less item line the next FF id (after the highest existing one), in file order.
+    Returns (new text, assigned ids). Existing ids and every other line stay byte-identical; a second run assigns nothing."""
+    lines = text.split("\n")
+    nums = [int(m.group(2).split("-")[1]) for m in (store.ITEM_RE.match(l.rstrip()) for l in lines) if m]
+    n = max(nums, default=0)
+    assigned: list[str] = []
+    for k, line in enumerate(lines):
+        m = _idless_match(line)
+        if m:
+            n += 1
+            assigned.append(f"FF-{n}")
+            lines[k] = f"- [{m.group(1)}] FF-{n} {m.group(2)}"
+    return "\n".join(lines), assigned
+
+
+def number_checklist(slug: str, root: Path | None = None) -> dict:
+    """Number the id-less lines of a feature's checklist.md. Writes (and keeps a history copy through the store) only when something changed."""
+    text = store.read_file(slug, "checklist.md", root)
+    new_text, assigned = number_items(text)
+    if assigned:
+        store.write_file(slug, "checklist.md", new_text, root)
+    return {"assigned": assigned, "items": len(store.parse_checklist_text(new_text))}
+
+
 # ---- checks ------------------------------------------------------------------------------------------------------
 
 def _clean_title(title) -> str:
@@ -319,7 +359,11 @@ def _run(entries: list[dict], ops: list, only: set[int] | None):
             if not _acyclic(trial):
                 raise ChecklistError("that would make the dependencies circular")
         except ChecklistError as e:
-            results.append({"index": n, "ok": False, "summary": str(e)})
+            res = {"index": n, "ok": False, "summary": str(e)}
+            if str(e).startswith("no such item") and has_idless(entries):
+                res["summary"] = f"{e}: items have no ids: Number them"
+                res["needsNumbering"] = True
+            results.append(res)
             continue
         entries[:] = trial
         results.append({"index": n, "ok": True, "summary": summary})
