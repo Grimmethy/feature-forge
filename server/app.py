@@ -366,6 +366,10 @@ def create_app(root: Path | None = None) -> Flask:
 
         return jsonify({"key": key}), 200
 
+    @app.get("/<path:filename>")
+    def web_static(filename):
+        return send_from_directory(WEB_DIR, filename)
+
     return app
 
 
