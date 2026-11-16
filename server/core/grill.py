@@ -27,6 +27,22 @@ BOOKKEEPING_RE = re.compile(r"^(CONTEXT-LOG|TASK-REF):.*$", re.M)
 PROPOSAL_RE = re.compile(r"```checklist-diff[ \t]*\n(.*?)\n[ \t]*```", re.S)
 
 _urlopen = urllib.request.urlopen     # tests replace this
+TURN_TIME_LIMIT_S = 900         # seconds a single model turn may take before it is reported as timed out
+
+
+def _sse_frame(payload: dict) -> str:
+    """One server-sent-event frame carrying a JSON payload."""
+    return "data: " + json.dumps(payload) + "\n\n"
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    """True when the exception, or anything it was raised from, is a timeout."""
+    seen: BaseException | None = exc
+    while seen is not None:
+        if isinstance(seen, TimeoutError) or isinstance(getattr(seen, "reason", None), TimeoutError):
+            return True
+        seen = seen.__cause__ or seen.__context__
+    return False
 
 
 class GrillError(RuntimeError):
@@ -222,13 +238,26 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
         save_meta(slug, meta, root)
     else:
         text = message
+    turn = int(meta.get("turns") or 0) + 1      # a retried turn reuses its number: the count only advances after the model accepts it
+    yield _sse_frame({"type": "turn-start", "turn": turn, "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "phase": "model"})
+    terminal_sent = False
     try:
-        resp = _call("POST", f"/api/chat/{sid}/message", {"message": text}, timeout=900, stream=True)
+        resp = _call("POST", f"/api/chat/{sid}/message", {"message": text}, timeout=TURN_TIME_LIMIT_S, stream=True)
+        meta["turns"] = turn
+        save_meta(slug, meta, root)
         with resp:
             for raw in resp:
                 yield (raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw).rstrip("\r\n") + "\n"
-    except GrillError as e:
-        yield "data: " + json.dumps({"type": "error", "error": str(e)}) + "\n\n"
+    except Exception as e:
+        if terminal_sent:
+            return
+        terminal_sent = True
+        if _is_timeout(e):
+            message_text = f"model turn timed out after {TURN_TIME_LIMIT_S} s"
+        else:
+            message_text = f"model call failed: {e}"
+        yield _sse_frame({"type": "error", "turn": turn, "message": message_text, "retryable": True})
+        return
 
 
 def extract_proposal(text: str) -> dict:
