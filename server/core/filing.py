@@ -52,10 +52,24 @@ def projects_path() -> Path:
     return Path(os.environ.get("FEATUREFORGE_PROJECTS", str(AM_CORE / "projects.json")))
 
 
+NEGATION = re.compile(r"\b(no|not|never|without|nor|instead of)\b|\bdon'?t\b", re.I)
+
+
+def _negated(text: str, start: int) -> bool:
+    """True when the match at `start` sits in a clause that negates it. A clause ends at . ; , ! ? or a newline."""
+    clause_start = max((text.rfind(c, 0, start) for c in ".;,!?\n"), default=-1) + 1
+    return NEGATION.search(text, clause_start, start) is not None
+
+
 def lint(text: str) -> list[str]:
-    """Warnings for polling language in text (an item's title and body). The standard clause is not counted."""
+    """Warnings for polling language in text (an item's title and body). The standard clause is not counted.
+    A match negated in its own clause ('do not add a new sleep loop') is not a warning; an unnegated match elsewhere still is."""
     text = text.replace(STANDARD_CLAUSE, "")
-    return [label for pat, label in POLL_PATTERNS if re.search(pat, text, re.I)]
+    warnings = []
+    for pat, label in POLL_PATTERNS:
+        if any(not _negated(text, m.start()) for m in re.finditer(pat, text, re.I)):
+            warnings.append(label)
+    return warnings
 
 
 def project_for(repo_name: str) -> dict:

@@ -81,6 +81,16 @@ class LintTests(unittest.TestCase):
     def test_the_standard_clause_does_not_trip_the_lint(self):
         self.assertEqual(filing.lint("do the thing. " + filing.STANDARD_CLAUSE), [])
 
+    def test_a_negated_polling_word_is_not_flagged(self):
+        for text in ("do not add a new sleep loop", "add no new timer", "never poll the queue", "without cron", "instead of a sleep loop, wake on the event"):
+            with self.subTest(text=text):
+                self.assertEqual(filing.lint(text), [])
+
+    def test_an_unnegated_match_still_warns_beside_a_negated_one(self):
+        self.assertTrue(filing.lint("do not add a sleep loop, but poll every 5 minutes"))
+        self.assertTrue(filing.lint("run a cron job"))
+        self.assertTrue(filing.lint("poll every 5 minutes"))
+
 
 class RecordTextTests(Base):
     def test_text_has_the_job_the_deps_the_plan_and_the_clause(self):
