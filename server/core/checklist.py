@@ -324,7 +324,11 @@ def _do_change(entries, op):
     if "title" in op:
         it["title"] = _clean_title(op["title"])
     if "body" in op:
-        it["body"] = _clean_body(op["body"])
+        stored = "".join(line + "\n" for line in it["body"])            # body lines -> text for the piece helpers
+        _lead, blocks = split_item_body(stored)                          # pieces stay as raw blocks, untouched
+        new_lead = "".join(line + "\n" for line in _clean_body(op["body"]))  # _clean_body applies to the new lead only
+        new_text = join_item_body(new_lead, blocks)
+        it["body"] = new_text.split("\n")[:-1] if new_text else []
     if "deps" in op:
         _set_deps(it, _clean_deps(op["deps"], known, it["id"]))
     if op.get("pieces") is not None:                       # new pieces are appended; existing ones (ticked or filed) are never touched
