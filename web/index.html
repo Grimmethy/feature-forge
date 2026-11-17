@@ -90,7 +90,7 @@ form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px s
   <div id="prop"></div>
 </div>
 <div id="toast"></div>
-<script src="feature-counts.js"></script>
+<script src="feature-counts.js" onerror="if(!window.countsHelperFailed){window.countsHelperFailed=true;const h=document.querySelector('#side header');const n=document.createElement('small');n.textContent='out of date: restart the server';n.style.color='var(--accent)';h.appendChild(n)}"></script>
 <script>
 const $=id=>document.getElementById(id);
 const STATUSES=['Grilling','Planned','Filed','Building','Done'];
@@ -101,7 +101,7 @@ async function api(url,opt){const r=await fetch(url,opt);const j=await r.json().
 const post=(url,body,method)=>api(url,{method:method||'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
 function renderFilters(){
-  const counts=featureCounts(features,STATUSES);
+  const counts=typeof featureCounts==='function'?featureCounts(features,STATUSES):Object.fromEntries(['All',...STATUSES,'Other'].map(s=>[s,s==='All'?features.length:features.filter(f=>s==='Other'?!STATUSES.includes(f.status):f.status===s).length]));
   const pills=['All',...STATUSES].concat(counts.Other>0?['Other']:[]);
   $('filters').innerHTML=pills.map(s=>`<button data-f="${s}" class="${s===filter?'on':''}">${s} ${counts[s]}</button>`).join('');
 }
