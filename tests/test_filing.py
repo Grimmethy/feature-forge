@@ -104,6 +104,16 @@ class LintTests(unittest.TestCase):
     def test_negated_does_not_poll_is_not_flagged(self):
         self.assertEqual(filing.lint("the worker does not poll the queue"), [])
 
+    def test_double_negation_not_never_poll(self):
+        # Double-negation edge case: "do not never poll the queue" contains two
+        # negation words ("not", "never") before "poll". The current implementation
+        # only checks for the FIRST negation word in the clause, so it treats the
+        # clause as negated and suppresses the warning -- even though a strict
+        # reading of double negation would imply the opposite. This test pins the
+        # current behavior so the edge case is explicit and ready for a decision
+        # on whether to handle it.
+        self.assertEqual(filing.lint("do not never poll the queue"), [])
+
     def test_negated_no_polling_is_not_flagged(self):
         self.assertEqual(filing.lint("no polling, the file is read on demand"), [])
 
