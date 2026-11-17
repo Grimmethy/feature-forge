@@ -68,7 +68,8 @@ form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px s
 .prop-evidence li{list-style:none}.prop-evidence li::before{content:"📎 "}
 .prop-outward{font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid var(--accent);color:var(--accent);background:rgba(217,164,65,.1)}
 .prop-acts{margin-top:4px;text-align:right}.prop-acts button{margin-left:4px;font-size:12px;padding:3px 8px}
-</style></head><body>
+</style><script type="module">import {onAssistantMessage, applyEnabled} from './stale-proposals.js'; Object.assign(window, {onAssistantMessage, applyEnabled});</script>
+</head><body>
 <div id="side">
   <header><b>Feature Forge</b><button id="bNew" class="primary" title="Describe a new feature">+ New</button><button id="bRefresh" title="Reload the library">Refresh</button></header>
   <div style="display:flex;gap:6px;padding:6px 12px 0"><button id="bBoard" title="Every item of every feature in three columns">Board</button><button id="bRepos" title="Features grouped by the repo they are built in">By repo</button><button id="bProposals" title="Scouted proposals ranked by value">Proposals</button></div>
