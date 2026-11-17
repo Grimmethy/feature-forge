@@ -52,7 +52,7 @@ def projects_path() -> Path:
     return Path(os.environ.get("FEATUREFORGE_PROJECTS", str(AM_CORE / "projects.json")))
 
 
-NEGATION = re.compile(r"\b(no|not|never|without|nor|instead of)\b|\bdon'?t\b", re.I)
+NEGATION = re.compile(r"\b(no|not|nothing|never|without|nor|instead of)\b|\bdon'?t\b", re.I)
 
 
 def _negated(text: str, start: int) -> bool:
