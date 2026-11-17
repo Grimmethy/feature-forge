@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 import markdown as md
-from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
+from flask import Flask, Response, abort, jsonify, request, send_from_directory, stream_with_context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from server.core import checklist, filing, grill, proposals, repo_create, status, store, views  # noqa: E402
@@ -95,6 +95,17 @@ def create_app(root: Path | None = None) -> Flask:
     @app.get("/")
     def index():
         return send_from_directory(WEB_DIR, "index.html")
+
+    @app.get("/<path:filename>")
+    def static_file(filename):
+        # Only the .js/.css files in web/ are served; dotfiles, other types, and anything
+        # send_from_directory's safe_join rejects (traversal) return 404.
+        parts = filename.split("/")
+        if "\\" in filename or any(part == "" or part.startswith(".") for part in parts):
+            abort(404)
+        if not filename.endswith((".js", ".css")):
+            abort(404)
+        return send_from_directory(WEB_DIR, filename)
 
     @app.get("/api/health")
     def health():
