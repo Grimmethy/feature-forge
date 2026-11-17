@@ -298,7 +298,10 @@ def create_app(root: Path | None = None) -> Flask:
         text = str((request.get_json(silent=True) or {}).get("message", "")).strip()
         if not text:
             return jsonify({"error": "message is required"}), 400
-        grill.load_meta(slug, sid, froot())
+        meta = grill.load_meta(slug, sid, froot())
+        # Check if the session is failed
+        if meta.get("failed"):
+            return jsonify({"error": "The interviewer was stopped (killed by the system, usually memory pressure). Nothing was lost. Please use the Retry button or start a new session."}), 409
         return _sse(grill.stream_turn(slug, sid, text, froot()))
 
     @app.post("/api/grill/<slug>/<sid>/save")
@@ -308,6 +311,27 @@ def create_app(root: Path | None = None) -> Flask:
     @app.post("/api/grill/<slug>/<sid>/end")
     def grill_end(slug, sid):
         return jsonify(grill.end(slug, sid, froot()))
+
+    @app.post("/api/grill/sessions/<session_id>/retry")
+    def grill_retry(session_id):
+        """Retry a failed session. Returns 409 if the session is not failed or has no last round."""
+        # Find the slug for this session_id
+        for slug_data in store.list_features(froot()):
+            slug = slug_data["slug"]
+            try:
+                meta = grill.load_meta(slug, session_id, froot())
+                # Check if the session is failed
+                if not meta.get("failed"):
+                    return jsonify({"error": "Session is not in a failed state"}), 409
+                last_round = meta["failed"].get("last_round")
+                if not last_round:
+                    return jsonify({"error": "Session has no last round to retry"}), 409
+                # Clear the failed state
+                result = grill.retry_session(slug, session_id, froot())
+                return jsonify(result), 200
+            except grill.GrillError as e:
+                return jsonify({"error": str(e)}), 409
+        return jsonify({"error": "Session not found"}), 404
 
 
     @app.get("/api/proposals")

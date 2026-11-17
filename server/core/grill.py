@@ -268,7 +268,7 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
                     if not failed_seen:
                         failed_seen = True
                         meta["failed"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "exit": code, "signal": sig,
-                                          "message": msg[:300]}
+                                          "message": msg[:300], "last_round": turn}
                         save_meta(slug, meta, root)
                         print(f"[grill] turn failed slug={slug} sid={sid} turn={turn} exit={code} signal={sig}",
                               file=sys.stderr, flush=True)
@@ -288,6 +288,21 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
             message_text = f"model call failed: {e}"
         yield _sse_frame({"type": "error", "turn": turn, "message": message_text, "retryable": True})
         return
+
+
+def retry_session(slug: str, sid: str, root: Path | None = None) -> dict:
+    """Check if a session can be retried. Returns the last round info and clears the failed state."""
+    meta = load_meta(slug, sid, root)
+    failed = meta.get("failed")
+    if not failed:
+        raise GrillError("session is not in a failed state")
+    last_round = failed.get("last_round")
+    if not last_round:
+        raise GrillError("session has no last round to retry")
+    # Clear the failed state
+    meta.pop("failed", None)
+    save_meta(slug, meta, root)
+    return {"session_id": sid, "round": last_round}
 
 
 def extract_proposal(text: str) -> dict:
