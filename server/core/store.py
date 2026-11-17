@@ -11,14 +11,18 @@ Done (all ticked). Progress is (ticked, total).
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
 FILES = ("request.md", "plan.md", "interview.md", "checklist.md")
 STATUSES = ("Grilling", "Planned", "Filed", "Building", "Done")
 DEFAULT_ROOT = Path(__file__).resolve().parents[2] / "features"
+ORDER_FILE = "order.json"
 
 ITEM_RE = re.compile(r"^- \[( |x|X)\] (FF-\d+) (.*?)\s*(?:<!--(.*?)-->)?\s*$")
 
@@ -29,6 +33,38 @@ class StoreError(RuntimeError):
 
 def _root(root: Path | None) -> Path:
     return Path(root) if root is not None else DEFAULT_ROOT
+
+
+def read_order(root: Path | None = None) -> list[str]:
+    """Saved feature order (a JSON list of slugs). Missing, corrupt, or non-list -> []. Duplicates dropped."""
+    try:
+        data = json.loads((_root(root) / ORDER_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    seen: list[str] = []
+    for s in data:
+        if isinstance(s, str) and s not in seen:
+            seen.append(s)
+    return seen
+
+
+def write_order(root: Path | None, slugs) -> None:
+    """Atomically write the saved order: temp file in the same directory, then os.replace."""
+    base = _root(root)
+    base.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=base, prefix=".order-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(list(slugs)))
+        os.replace(tmp, base / ORDER_FILE)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def slugify(text: str) -> str:
@@ -86,6 +122,10 @@ def create_feature(title: str, request_text: str, root: Path | None = None) -> s
     d.joinpath("plan.md").write_text(f"# Plan: {title}\n\n_Not started._\n", encoding="utf-8")
     d.joinpath("interview.md").write_text(f"# Interview: {title}\n\n_Not started._\n", encoding="utf-8")
     d.joinpath("checklist.md").write_text(f"# Checklist: {title}\n\n", encoding="utf-8")
+    order = read_order(root)
+    if slug not in order:
+        order.append(slug)
+        write_order(root, order)
     return slug
 
 
@@ -158,12 +198,24 @@ def list_features(root: Path | None = None) -> list[dict]:
     base = _root(root)
     if not base.is_dir():
         return []
-    out = []
+    rows: dict[str, dict] = {}
     for d in sorted(p for p in base.iterdir() if p.is_dir() and not p.name.startswith(".")):
         items = parse_checklist(d.name, root)
         title, repo = _request_info(d.name, root)
         done, total = progress(items)
         updated = max((f.stat().st_mtime for f in d.glob("*.md")), default=d.stat().st_mtime)
-        out.append({"slug": d.name, "title": title, "status": derive_status(items), "ticked": done,
-                    "total": total, "repo": repo, "updated": updated})
-    return out
+        rows[d.name] = {"slug": d.name, "title": title, "status": derive_status(items), "ticked": done,
+                        "total": total, "repo": repo, "updated": updated}
+    listed = [s for s in read_order(root) if s in rows]
+    rest = sorted(s for s in rows if s not in listed)
+    return [rows[s] for s in listed + rest]
+
+
+def feature_ranks(root: Path | None = None) -> dict[str, int]:
+    """1-based rank for each non-Done feature, in list_features order. Done features are omitted."""
+    ranks: dict[str, int] = {}
+    for row in list_features(root):
+        if row["status"] == "Done":
+            continue
+        ranks[row["slug"]] = len(ranks) + 1
+    return ranks
