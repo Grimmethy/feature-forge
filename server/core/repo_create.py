@@ -54,7 +54,10 @@ def _registered(name: str) -> bool:
 
 def _registered_names() -> set:
     """Every label and repo folder name in projects.json."""
-    projects = json.loads(filing.projects_path().read_text(encoding="utf-8"))
+    try:
+        projects = json.loads(filing.projects_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()        # no readable projects.json means nothing is registered (same as _registered), not a 500
     names = set()
     for p in projects:
         for v in (p.get("label"), Path(p.get("repoRoot", "")).name):
