@@ -114,5 +114,45 @@ class GrillEventsTest(unittest.TestCase):
         self.assertEqual(grill.load_meta(self.slug, self.sid, self.root)["turns"], 2)
 
 
+    def _relay(self, lines):
+        import io
+        err = io.StringIO()
+
+        def stub(method, path, body=None, timeout=None, stream=False):
+            return _StubStream(lines)
+
+        with mock.patch("sys.stderr", err):
+            events = _events(self._run("hello", stub))
+        return events, err.getvalue()
+
+    def test_relayed_sigkill_error_marks_failed_and_is_retryable(self):
+        frame = {"type": "error", "error": "claude -p failed: exit=null signal=SIGKILL (no stderr, no stdout)"}
+        events, err = self._relay(["data: " + json.dumps(frame)])
+        errors = [e for e in events if e.get("type") == "error"]
+        self.assertEqual(len(errors), 1)
+        self.assertTrue(errors[0]["retryable"])
+        self.assertTrue(errors[0]["killed"])
+        failed = grill.load_meta(self.slug, self.sid, self.root)["failed"]
+        self.assertEqual(failed["signal"], "SIGKILL")
+        self.assertEqual(failed["exit"], "null")
+        self.assertIn("at", failed)
+        self.assertIn("SIGKILL", failed["message"])
+        self.assertEqual(err.count("[grill] turn failed"), 1)
+        self.assertIn("exit=null signal=SIGKILL", err)
+
+    def test_normal_stream_sets_no_failure(self):
+        events, err = self._relay(["data: {\"type\": \"text\", \"text\": \"hi\"}", "data: not json"])
+        self.assertNotIn("failed", grill.load_meta(self.slug, self.sid, self.root))
+        self.assertEqual(err, "")
+        self.assertFalse([e for e in events if e.get("type") == "error"])
+
+    def test_error_without_exit_text_is_unknown_but_failed(self):
+        events, err = self._relay(["data: {\"type\": \"error\", \"error\": \"something odd\"}"])
+        failed = grill.load_meta(self.slug, self.sid, self.root)["failed"]
+        self.assertEqual((failed["exit"], failed["signal"]), ("unknown", "unknown"))
+        self.assertNotIn("killed", [e for e in events if e.get("type") == "error"][0])
+        self.assertIn("exit=unknown signal=unknown", err)
+
+
 if __name__ == "__main__":
     unittest.main()
