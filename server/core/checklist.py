@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 from . import store
+from .checklist_pieces import join_item_body, split_item_body
 
 META_ORDER = ("task", "premium", "cloud", "deps", "after", "filed", "manual", "merged", "changed")
 TITLE_CAP = 120
