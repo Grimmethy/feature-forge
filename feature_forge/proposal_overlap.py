@@ -39,6 +39,8 @@ def _jaccard(a, b):
 
 
 def find_overlaps(new_piece, filed_pieces, threshold=OVERLAP_THRESHOLD):
+    if not filed_pieces or not isinstance(new_piece, dict):
+        return []
     new_paths = _paths(new_piece)
     new_funcs = _functions(new_piece)
     new_words = _title_words(new_piece.get('title'))
