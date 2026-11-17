@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 import markdown as md
-from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
+from flask import Flask, Response, abort, jsonify, request, send_from_directory, stream_with_context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from server.core import checklist, filing, grill, proposals, repo_create, status, store, views  # noqa: E402
@@ -95,6 +95,15 @@ def create_app(root: Path | None = None) -> Flask:
     @app.get("/")
     def index():
         return send_from_directory(WEB_DIR, "index.html")
+
+    @app.get("/<name>")
+    def static_asset(name: str):
+        mime = {".js": "text/javascript", ".css": "text/css"}
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]*\.(js|css)", name):
+            abort(404)
+        if not (WEB_DIR / name).is_file():
+            abort(404)
+        return send_from_directory(WEB_DIR, name, mimetype=mime[Path(name).suffix])
 
     @app.get("/api/health")
     def health():
