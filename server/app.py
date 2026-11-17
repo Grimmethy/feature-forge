@@ -334,8 +334,8 @@ def create_app(root: Path | None = None) -> Flask:
                 # Clear the failed state
                 result = grill.retry_session(slug, session_id, froot())
                 return jsonify(result), 200
-            except grill.GrillError as e:
-                return jsonify({"error": str(e)}), 409
+            except (grill.GrillError, store.StoreError):
+                continue
         return jsonify({"error": "Session not found"}), 404
 
 
