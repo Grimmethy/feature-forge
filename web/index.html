@@ -68,7 +68,7 @@ form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px s
 .prop-evidence li{list-style:none}.prop-evidence li::before{content:"📎 "}
 .prop-outward{font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid var(--accent);color:var(--accent);background:rgba(217,164,65,.1)}
 .prop-acts{margin-top:4px;text-align:right}.prop-acts button{margin-left:4px;font-size:12px;padding:3px 8px}
-</style><script type="module">import {onAssistantMessage, applyEnabled} from './stale-proposals.js'; Object.assign(window, {onAssistantMessage, applyEnabled});</script>
+</style><script type="module">import {onAssistantMessage, applyEnabled, getState} from './stale-proposals.js'; Object.assign(window, {onAssistantMessage, applyEnabled, getState});</script>
 </head><body>
 <div id="side">
   <header><b>Feature Forge</b><button id="bNew" class="primary" title="Describe a new feature">+ New</button><button id="bRefresh" title="Reload the library">Refresh</button></header>
@@ -333,7 +333,19 @@ $('gend').onclick=async()=>{if(!G)return;
   if(gUnsaved&&!gEnding){gEnding=true;gadd('sys','Not saved yet. Press End again to discard, or Save to interview first.');return}
   await post(`/api/grill/${G.slug}/${G.sid}/end`,{}).catch(()=>{});gReset();gNode='feature';gadd('sys','Session ended.')};
 /* ---- proposal review: the model proposes checklist changes, the owner ticks which to apply ---- */
-// GAP: applyEnabled is imported (line 71, from ./stale-proposals.js) but never called, and no state accessor is passed to it for #gapply (HUB0033 1/5)
+function syncApplyDisabled() {
+  const btn = document.getElementById('gapply');
+  if (!btn) return;
+  if (typeof applyEnabled === 'function') {
+    try {
+      btn.disabled = !applyEnabled(getState());
+    } catch (e) {
+      // GAP: applyEnabled threw; leave disabled untouched (HUB0033 2/5)
+    }
+  } else {
+    // GAP: applyEnabled unavailable; leave disabled untouched (HUB0033 2/5)
+  }
+}
 let PROP=null;
 function showProp(){
   const box=$('prop');box.style.display='block';
