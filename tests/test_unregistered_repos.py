@@ -42,6 +42,13 @@ class UnregisteredReposTests(unittest.TestCase):
         self.assertNotIn("foo-pipeline", result)
         self.assertNotIn("foo-manual", result)
 
+    def test_keeps_pipeline_ops_repo_and_excludes_its_pipeline_dir(self):
+        (self.root / "agent-manager-pipeline-ops").mkdir()
+        (self.root / "agent-manager-pipeline-ops-pipeline").mkdir()
+        result = repo_create.unregistered_repos(str(self.root))
+        self.assertIn("agent-manager-pipeline-ops", result)
+        self.assertNotIn("agent-manager-pipeline-ops-pipeline", result)
+
     def test_result_is_sorted(self):
         result = repo_create.unregistered_repos(str(self.root))
         self.assertEqual(result, sorted(result))

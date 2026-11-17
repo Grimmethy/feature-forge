@@ -22,7 +22,7 @@ CONTEXT_CAP = 40_000            # characters of context put into the seed
 FILE_CAP = 8_000                # per context file
 TREE_CAP = 120                  # lines of the repo file tree
 REPO_DOCS = ("CONTEXT.md", "CLAUDE.md", "AGENTS.md", "README.md")
-SKIP_REPO = re.compile(r"(-pipeline|-manual|-BACKUP|-hub-p\d+|-wake-others\d*|-test-tmp)", re.I)
+SKIP_REPO = re.compile(r"(?:-pipeline|-manual|-BACKUP|-hub-p\d+|-wake-others\d*|-test-tmp)$", re.I)
 BOOKKEEPING_RE = re.compile(r"^(CONTEXT-LOG|TASK-REF):.*$", re.M)
 PROPOSAL_RE = re.compile(r"```checklist-diff[ \t]*\n(.*?)\n[ \t]*```", re.S)
 

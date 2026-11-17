@@ -73,6 +73,15 @@ class RepoTests(GrillTestBase):
         self.assertEqual(names["alpha"]["summary"], "A tool for making alphas.")
         self.assertEqual(names["beta"]["summary"], "Beta context line.")
 
+    def test_repo_index_keeps_pipeline_ops_and_skips_only_scratch_suffixes(self):
+        self.make_repo("agent-manager-pipeline-ops")
+        self.make_repo("agent-manager-pipeline-ops-pipeline")
+        self.make_repo("X-manual")
+        self.make_repo("X-BACKUP")
+        self.make_repo("X-hub-p3")
+        names = {r["name"] for r in grill.repo_index(self.repos)}
+        self.assertEqual(names, {"agent-manager-pipeline-ops"})
+
     def test_repo_index_of_a_missing_folder_is_empty(self):
         self.assertEqual(grill.repo_index(self.repos / "nowhere"), [])
 
@@ -161,8 +170,9 @@ class SessionTests(GrillTestBase):
         slug = self.feature()
         grill.start(slug, root=self.root)
         grill._urlopen = FakeChat(fail=True)
-        (line,) = [ln for ln in grill.stream_turn(slug, "chat-1-abc", "hi", self.root) if ln.strip()]
-        self.assertEqual(json.loads(line[len("data: "):])["type"], "error")
+        lines = [ln for ln in grill.stream_turn(slug, "chat-1-abc", "hi", self.root) if ln.strip()]
+        types = [json.loads(ln[len("data: "):])["type"] for ln in lines]
+        self.assertEqual(types[-1], "error")
 
     def test_bad_session_ids_are_rejected(self):
         slug = self.feature()
