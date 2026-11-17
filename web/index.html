@@ -333,6 +333,7 @@ $('gend').onclick=async()=>{if(!G)return;
   if(gUnsaved&&!gEnding){gEnding=true;gadd('sys','Not saved yet. Press End again to discard, or Save to interview first.');return}
   await post(`/api/grill/${G.slug}/${G.sid}/end`,{}).catch(()=>{});gReset();gNode='feature';gadd('sys','Session ended.')};
 /* ---- proposal review: the model proposes checklist changes, the owner ticks which to apply ---- */
+// GAP: applyEnabled is imported (line 71, from ./stale-proposals.js) but never called, and no state accessor is passed to it for #gapply (HUB0033 1/5)
 let PROP=null;
 function showProp(){
   const box=$('prop');box.style.display='block';
