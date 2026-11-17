@@ -340,7 +340,7 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
         it["meta"].setdefault("filed", stamp)                   # the first piece filed locks the item
         it["dirty"] = True
         _write_entries(slug, entries, root)                     # each task exists now: record it before anything else can fail
-        entry = {"piece": p["id"], "task": task}
+        entry = {"piece": p["id"], "status": "filed", "repo": _target["targetRepo"], "task": task}
         if premium:
             try:
                 _post(f"/api/task-anywhere/{task}/premium-priority?project={project['repoRoot']}", {"enabled": True, "by": "operator-ui"})
@@ -353,7 +353,8 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
 
 def file_item(slug: str, item_id: str, accept_lint: bool = False, root: Path | None = None, piece: str | None = None) -> dict:
     """File an item as Agent Manager tasks. An item without pieces is one task; an item with pieces files each unfiled piece as its own task,
-    in order, each waiting for the one before (or just one piece when `piece` names it). Returns {id, task, premium, warnings} (+ pieces)."""
+    in order, each waiting for the one before (or just one piece when `piece` names it). Returns {id, task, premium, warnings} plus a `pieces`
+    list with one entry per piece, each holding status (filed/blocked/failed) and target repo."""
     entries, it = _item(slug, item_id, root)
     if it["ticked"]:
         raise FilingError(f"{item_id} is already done")
