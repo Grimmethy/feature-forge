@@ -313,7 +313,7 @@ async function gstream(url,body){
         for(const ln of fr.split('\n')){if(!ln.startsWith('data:'))continue;let ev;try{ev=JSON.parse(ln.slice(5))}catch{continue}
           if(ev.type==='chunk'){bub.textContent+=ev.text;$('gt').scrollTop=1e9}
           else if(ev.type==='error')gadd('sys','Error: '+ev.error)}}}
-    if(!bub.textContent)bub.textContent='(no reply)';gUnsaved=true;
+    if(!bub.textContent)bub.textContent='(no reply)';gUnsaved=true;onAssistantMessage(bub);
   }catch(e){bub.className='gm sys';bub.textContent='Error: '+e.message}
   $('gsend').disabled=false}
 $('bGrill').onclick=()=>{if(!G)gNode='feature';openGrill()};
