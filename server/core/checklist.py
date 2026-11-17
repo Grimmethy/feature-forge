@@ -139,6 +139,20 @@ PIECE_BODY_CAP = 2000
 PIECE_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 
 
+def limits_block() -> str:
+    """Checklist size limits and rules, rendered as plain text for the interviewer."""
+    lines = [
+        f"Item body limit: {BODY_CAP} characters.",
+        f"Piece text limit: {PIECE_BODY_CAP} characters.",
+        f"Title length: 1-{TITLE_CAP} characters.",
+        "Text must not contain '<!--' or '-->'.",
+        "Dependencies may only reference ids that already exist before the ops are applied.",
+        "No item may depend on itself.",
+        "No forward references: an op may not depend on an id created later in the same batch.",
+    ]
+    return "\n".join(lines)
+
+
 def _piece_lines(item_id: str, specs, taken: set[str]) -> list[str]:
     """Body lines for new pieces labelled <item number><letter> (4a, 4b...), skipping labels already taken; each spec is a title or {title, body}."""
     if not isinstance(specs, list) or not specs:
