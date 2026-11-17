@@ -20,6 +20,7 @@ from pathlib import Path
 
 from . import checklist, grill, parallel_files, store
 from .piece_repo_lint import lint_piece_repo_mismatch
+from .piece_routing import route_pieces
 
 AM_CORE = Path(os.environ.get("FEATUREFORGE_AM_CORE", "/media/model-cache/github/agent-manager"))
 AM_URL = os.environ.get("FEATUREFORGE_AM_URL", "http://localhost:7420")
@@ -262,6 +263,22 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
             + "; reword to use a trigger, or accept the warning"
         )
     todo = [p for p in todo if p["id"] not in blocked]
+    # Route each piece to its target repo. Pieces with no override inherit
+    # the feature repo; pieces whose target differs from the feature repo get
+    # that repo's header line prepended into the queued text.
+    feature_repo = grill.target_repo(slug, root)["name"]
+
+    def _repo_known(name: str) -> bool:
+        try:
+            project_for(name)
+            return True
+        except NotRegisteredError:
+            return False
+
+    routed = route_pieces(todo, feature_repo, _repo_known)
+    for r in routed:
+        if r["status"] == "blocked":
+            raise FilingError(r["message"])
     premium = it["meta"].get("premium") == "true"
     out = {"id": item_id, "pieces": [], "premium": premium, "warnings": warnings}
     _deps_map: dict[str, set[str]] = {}
@@ -304,8 +321,18 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
                 continue
             for shared in sorted(p_files & prev_files):
                 warnings.append(f"{p['id']} and {prev['id']} both name {shared}; they can run in parallel and may conflict")
+        _target = next(r for r in routed if r["piece"]["id"] == p["id"])
+        text = record_text(slug, item_id, root, p["id"])
+        if _target["targetRepo"] != feature_repo:
+            text = re.sub(
+                r"^Repo: " + re.escape(feature_repo) + r"\.$",
+                f"Repo: {_target['targetRepo']}.",
+                text,
+                count=1,
+                flags=re.MULTILINE,
+            )
         try:
-            task = _queue_task(project, f"{item_id}/{p['id']} {p['title']}", record_text(slug, item_id, root, p["id"]), f"feature-forge:{slug}/{item_id}/{p['id']}", deps)
+            task = _queue_task(project, f"{item_id}/{p['id']} {p['title']}", text, f"feature-forge:{slug}/{item_id}/{p['id']}", deps)
         except FilingError as e:
             raise FilingError(f"{e} (filed so far: {', '.join(x['task'] for x in out['pieces']) or 'nothing'})")
         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
