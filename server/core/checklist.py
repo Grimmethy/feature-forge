@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 from . import store
-from .checklist_pieces import join_item_body, split_item_body
+from .checklist_pieces import join_item_body, split_item_body, next_piece_label, _increment_label
 
 META_ORDER = ("task", "premium", "cloud", "deps", "after", "filed", "manual", "merged", "changed")
 TITLE_CAP = 120
@@ -319,8 +319,11 @@ def _do_add(entries, op):
 
 
 def _do_change(entries, op):
+    from .checklist_guard import assert_tagged_pieces_kept  # lazy import to avoid cycle with checklist.py
     it = _find(entries, op.get("id"))
     known = {i["id"] for i in items(entries)}
+    # Snapshot existing piece blocks (before any mutation) so the drop guard can compare.
+    before_blocks = split_item_body("\n".join(it["body"]))[1]
     if "title" in op:
         it["title"] = _clean_title(op["title"])
     if "body" in op:
@@ -332,7 +335,30 @@ def _do_change(entries, op):
     if "deps" in op:
         _set_deps(it, _clean_deps(op["deps"], known, it["id"]))
     if op.get("pieces") is not None:                       # new pieces are appended; existing ones (ticked or filed) are never touched
-        it["body"] = it["body"] + _piece_lines(it["id"], op["pieces"], {p["id"] for p in pieces(it)})
+        _lead, existing_blocks = split_item_body("\n".join(it["body"]))
+        if existing_blocks:
+            start_label = next_piece_label(existing_blocks)
+        else:
+            num = it["id"].split("-")[1]
+            start_label = f"{num}a"
+        new_lines: list[str] = []
+        label = start_label
+        for spec in op["pieces"]:
+            title, body = (spec, "") if isinstance(spec, str) else (spec.get("title"), spec.get("body", "")) if isinstance(spec, dict) else (None, "")
+            text = str(body or "").strip("\n")
+            if len(text) > PIECE_BODY_CAP or "-->" in text or "<!--" in text:
+                raise ChecklistError(f"a piece's text must be at most {PIECE_BODY_CAP} characters without comment marks")
+            new_lines.append(f"- [ ] {label} {_clean_title(title)}")
+            if text.strip():
+                new_lines.extend("  " + b for b in text.split("\n") if b.strip())
+            try:
+                label = _increment_label(label)
+            except ValueError:
+                raise ChecklistError(f"cannot extend piece label beyond 'z' for item {it['id']}")
+        it["body"] = it["body"] + new_lines
+    # Drop guard: tagged pieces (task:/filed:/merged:) must survive byte-identical.
+    after_blocks = split_item_body("\n".join(it["body"]))[1]
+    assert_tagged_pieces_kept(it["id"], before_blocks, after_blocks)
     if is_locked(it):
         it["meta"]["changed"] = time.strftime("%Y-%m-%d")
     it["dirty"] = True
