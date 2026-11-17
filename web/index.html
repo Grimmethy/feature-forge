@@ -130,23 +130,22 @@ function actionsHtml(i){const m=i.meta||{};let h='';
     else if(m.task)h+=`<br><small>task ${esc(m.task)}${taskStates[i.id]?' · '+esc(taskStates[i.id].state):''}</small>`}
   return h+`<button data-grill="${esc(i.id)}" title="Interview me about just this item">Grill</button>`}
 function checklistAddForm(){return `<form class="nf" id="checklist-add-form"><h3>Add item</h3>
-<label>Title<textarea name="title" required></textarea></label>
-<label>Body<textarea name="body"></textarea></label>
-<label>Premium <small>(optional)</small><input name="premium"></label>
+<label>Title<input id="item-title" name="title" type="text" required></label>
+<label>Body<textarea id="item-body" name="body"></textarea></label>
+<label>Premium <small>(optional)</small><input id="item-premium" name="premium" type="checkbox"></label>
 <label>Deps <small>(optional)</small><input name="deps"></label>
 <div><button class="primary" type="submit">Add item</button></div>
-<small id="checklist-add-error" class="warn"></small></form>`}
+<small id="add-item-error" class="warn"></small></form>`}
 function wireChecklistAdd(){const f=$('checklist-add-form');if(!f)return;
-  f.onsubmit=async ev=>{ev.preventDefault();const err=$('checklist-add-error');err.textContent='';
+  f.onsubmit=async ev=>{ev.preventDefault();const err=$('add-item-error');err.textContent='';
     const body={title:f.elements.title.value.trim(),body:f.elements.body.value};
-    const premium=f.elements.premium.value.trim(),deps=f.elements.deps.value.trim();
-    if(premium)body.premium=premium;if(deps)body.deps=deps;
-    try{const r=await fetch('/api/checklist/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const deps=f.elements.deps.value.trim();
+    body.premium=!!f.elements.premium.checked;if(deps)body.deps=deps;
+    try{const r=await fetch(`/api/features/${encodeURIComponent(cur)}/checklist/items`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const t=await r.text();
-      if(r.status===400){let j=null;try{j=JSON.parse(t)}catch{}err.textContent=(j&&j.error)||t||'Bad request';return}
-      if(!r.ok)throw new Error(r.status);
+      if(!r.ok){let j=null;try{j=JSON.parse(t)}catch{}err.textContent=(j&&(j.error||j.message))||r.statusText||'Request failed';return}
       await openFile('checklist.md');
-    }catch(e){toast(e.message)}}}
+    }catch(e){err.textContent=e.message||'Network error'}}}
 function checklistHtml(items){
   if(!items.length)return '<p><small>No checklist items yet.</small></p>';
   return items.map(i=>{const m=i.meta||{};
