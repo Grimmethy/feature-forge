@@ -18,7 +18,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from . import checklist, grill, parallel_files, store
+from . import checklist, grill, parallel_files, piece_repo_lint, store
 
 AM_CORE = Path(os.environ.get("FEATUREFORGE_AM_CORE", "/media/model-cache/github/agent-manager"))
 AM_URL = os.environ.get("FEATUREFORGE_AM_URL", "http://localhost:7420")
@@ -241,6 +241,9 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
     warnings = sorted({w for p in todo for w in lint(p["title"] + "\n" + p["body"])})
     if warnings and not accept_lint:
         raise FilingError("polling language in this item (" + ", ".join(warnings) + "): reword it to use a trigger, or accept the warning")
+    # Repo-line lint: a warning only. It is added after the polling-language gate above, so it never changes the File decision.
+    warnings += piece_repo_lint.lint_piece_repo_mismatch(
+        todo, project.get("label") or Path(project["repoRoot"]).name, lambda piece, feature_repo: feature_repo)
     premium = it["meta"].get("premium") == "true"
     out = {"id": item_id, "pieces": [], "premium": premium, "warnings": warnings}
     _deps_map: dict[str, set[str]] = {}
