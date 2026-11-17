@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -43,6 +44,12 @@ def _is_timeout(exc: BaseException) -> bool:
             return True
         seen = seen.__cause__ or seen.__context__
     return False
+
+
+def _parse_exit_signal(message: str) -> tuple[str, str]:
+    """Pull (exit, signal) out of 'claude -p failed: exit=<code> signal=<name> ...'; 'unknown' when absent."""
+    m = re.search(r"exit=(\S+) signal=(\S+)", message or "")
+    return (m.group(1), m.group(2)) if m else ("unknown", "unknown")
 
 
 class GrillError(RuntimeError):
@@ -246,8 +253,31 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
         meta["turns"] = turn
         save_meta(slug, meta, root)
         with resp:
+            failed_seen = False
             for raw in resp:
-                yield (raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw).rstrip("\r\n") + "\n"
+                line = (raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw).rstrip("\r\n")
+                frame = None
+                if line.startswith("data:"):
+                    try:
+                        frame = json.loads(line[5:].strip())
+                    except ValueError:
+                        frame = None
+                if isinstance(frame, dict) and frame.get("type") == "error":
+                    msg = str(frame.get("error") or frame.get("message") or "")
+                    code, sig = _parse_exit_signal(msg)
+                    if not failed_seen:
+                        failed_seen = True
+                        meta["failed"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "exit": code, "signal": sig,
+                                          "message": msg[:300]}
+                        save_meta(slug, meta, root)
+                        print(f"[grill] turn failed slug={slug} sid={sid} turn={turn} exit={code} signal={sig}",
+                              file=sys.stderr, flush=True)
+                    frame["retryable"] = True
+                    if sig == "SIGKILL":
+                        frame["killed"] = True
+                    yield _sse_frame(frame)
+                    continue
+                yield line + "\n"
     except Exception as e:
         if terminal_sent:
             return
