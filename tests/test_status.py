@@ -68,7 +68,7 @@ class SyncTests(Base):
     def test_states_are_reported_for_every_filed_item(self):
         s = status.sync(self.slug, self.root)["states"]
         self.assertEqual(s["FF-2"]["state"], "merged")
-        self.assertEqual(s["FF-3"], {"state": "review", "status": "review"})
+        self.assertEqual(s["FF-3"], {"state": "review", "status": "review", "reason": "review"})
         self.assertEqual(s["FF-4"]["state"], "missing")
         self.assertEqual(s["FF-5"]["state"], "done")
         self.assertEqual(s["FF-6"]["state"], "archived")
@@ -98,10 +98,10 @@ class SyncTests(Base):
 
     def test_no_filed_items_or_no_repo_do_nothing(self):
         store.write_file(self.slug, "checklist.md", "# Checklist: x\n\n- [ ] FF-1 a <!-- deps: -->\n", self.root)
-        self.assertEqual(status.sync(self.slug, self.root), {"ticked": [], "states": {}})
+        self.assertEqual(status.sync(self.slug, self.root), {"ticked": [], "states": {}, "ticked_by_reason": {}})
         store.write_file(self.slug, "checklist.md", CHECKLIST, self.root)
         store.write_file(self.slug, "request.md", "# Thing\n\nno repo", self.root)
-        self.assertEqual(status.sync(self.slug, self.root), {"ticked": [], "states": {}})
+        self.assertEqual(status.sync(self.slug, self.root), {"ticked": [], "states": {}, "ticked_by_reason": {}})
         self.assertFalse(self.items()["FF-2"]["ticked"])
 
     def test_a_history_copy_is_kept_when_it_writes(self):
@@ -152,7 +152,7 @@ class PieceSyncTests(Base):
     def test_states_are_keyed_by_the_piece(self):
         s = status.sync(self.slug, self.root)["states"]
         self.assertEqual(s["FF-1/1a"]["state"], "merged")
-        self.assertEqual(s["FF-1/1b"], {"state": "review", "status": "review"})
+        self.assertEqual(s["FF-1/1b"], {"state": "review", "status": "review", "reason": "review"})
         self.assertNotIn("FF-1", s)                                  # the step itself has no task
         self.assertNotIn("FF-2/2b", s)                               # an unfiled piece has none either
 
@@ -233,6 +233,91 @@ class FindTaskTests(Base):
 
     def test_unknown_is_none(self):
         self.assertEqual(status.find_task(str(self.pipe), "nope"), (None, None))
+
+
+HUB_TEXT = """# Checklist: Thing
+
+- [ ] FF-1 Parent <!-- task: th-parent filed: 2026-11-14T04:00:00Z deps: -->
+- [ ] FF-2 Noop task <!-- task: th-noop filed: 2026-11-14T04:00:00Z deps: -->
+- [ ] FF-3 Pending task <!-- task: th-pend filed: 2026-11-14T04:00:00Z deps: -->
+- [ ] FF-4 Coordinating parent <!-- task: th-coord filed: 2026-11-14T04:00:00Z deps: -->
+"""
+
+
+class HubTests(Base):
+    """Fixture records for the noop, pending-merge, archived-hub and coordinating-parent dispositions.
+    The field names (terminalDisposition, subTasks, hubLabel) follow the task text and are not yet confirmed against live records."""
+
+    def setUp(self):
+        super().setUp()
+        (self.pipe / "queue" / "coordinating").mkdir(parents=True, exist_ok=True)
+        store.write_file(self.slug, "checklist.md", HUB_TEXT, self.root)
+        self.put("done/_archived_no_action", "th-parent", {"status": "done", "hubLabel": "HUB0396",
+                 "subTasks": ["th-p1", "th-p2"]})
+        self.put("done", "th-p1", {"status": "done", "terminalDisposition": "noop"})
+        self.put("done", "th-p2", {"status": "done", "mergedAt": "2026-11-14T05:00:00+00:00"})
+        self.put("done", "th-noop", {"status": "done", "terminalDisposition": "noop"})
+        self.put("done", "th-pend", {"status": "done", "terminalDisposition": "pending-merge"})
+        self.put("coordinating", "th-coord", {"status": "coordinating", "hubLabel": "HUB0401", "subTasks": []})
+
+    def test_hub_noop_piece_still_ticks(self):
+        r = status.sync(self.slug, self.root)
+        self.assertIn("FF-1", r["ticked"])
+        it = self.items()["FF-1"]
+        self.assertTrue(it["ticked"])
+        self.assertEqual(it["meta"]["merged"], "2026-11-14T05:00:00Z")
+        self.assertIn("HUB0396", r["states"]["FF-1"]["reason"])
+        self.assertEqual(r["states"]["FF-1"]["state"], "hub HUB0396, 2 of 2 pieces done")
+
+    def test_hub_with_a_pending_merge_piece_does_not_tick(self):
+        self.put("done", "th-p2", {"status": "done", "terminalDisposition": "pending-merge"})
+        r = status.sync(self.slug, self.root)
+        self.assertNotIn("FF-1", r["ticked"])
+        self.assertFalse(self.items()["FF-1"]["ticked"])
+        self.assertIn("th-p2", r["states"]["FF-1"]["reason"])
+
+    def test_hub_with_a_missing_piece_names_it_and_does_not_tick(self):
+        (self.pipe / "queue" / "done" / "th-p1.json").unlink()
+        r = status.sync(self.slug, self.root)
+        self.assertNotIn("FF-1", r["ticked"])
+        self.assertIn("th-p1", r["states"]["FF-1"]["reason"])
+
+    def test_hub_with_one_open_piece_shows_progress_and_does_not_tick(self):
+        self.put("done", "th-p1", {"status": "review"})
+        self.put("done/_archived_no_action", "th-parent", {"status": "done", "hubLabel": "HUB0396",
+                 "subTasks": ["th-p1", "th-p2", "th-p3"]})
+        self.put("done", "th-p3", {"status": "done", "mergedAt": "2026-11-14T05:00:00+00:00"})
+        (self.pipe / "queue" / "done" / "th-p1.json").unlink()
+        self.put("review", "th-p1", {"status": "review"})
+        r = status.sync(self.slug, self.root)
+        self.assertEqual(r["states"]["FF-1"]["state"], "hub HUB0396, 2 of 3 pieces done")
+        self.assertNotIn("FF-1", r["ticked"])
+
+    def test_noop_task_ticks_as_no_change_needed(self):
+        r = status.sync(self.slug, self.root)
+        self.assertIn("FF-2", r["ticked"])
+        it = self.items()["FF-2"]
+        self.assertEqual(it["meta"]["merged"], "noop")
+        self.assertEqual(r["states"]["FF-2"]["state"], "no change needed")
+        self.assertIn("no change needed", r["states"]["FF-2"]["reason"])
+
+    def test_pending_merge_task_is_labelled_awaiting_merge_and_not_ticked(self):
+        r = status.sync(self.slug, self.root)
+        self.assertEqual(r["states"]["FF-3"]["state"], "awaiting merge")
+        self.assertNotIn("FF-3", r["ticked"])
+        self.assertFalse(self.items()["FF-3"]["ticked"])
+
+    def test_coordinating_parent_with_empty_subtasks_is_labelled_and_not_ticked(self):
+        r = status.sync(self.slug, self.root)
+        self.assertEqual(r["states"]["FF-4"]["state"], "coordinating, no pieces recorded")
+        self.assertNotIn("FF-4", r["ticked"])
+        self.assertFalse(self.items()["FF-4"]["ticked"])
+
+    def test_ticked_by_reason_counts_each_tick(self):
+        r = status.sync(self.slug, self.root)
+        self.assertEqual(sum(r["ticked_by_reason"].values()), len(r["ticked"]))
+        self.assertEqual(r["ticked_by_reason"].get("hub"), 1)
+        self.assertEqual(r["ticked_by_reason"].get("no change needed"), 1)
 
 
 if __name__ == "__main__":

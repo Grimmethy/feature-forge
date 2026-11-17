@@ -4,6 +4,9 @@ Nothing here runs on a timer. sync() is called when a feature is opened or refre
 wake-ups); it only READS the target project's queue folders and writes the checklist when a task has merged. A merged task ticks its
 item ('merged: <time>', 'took: <minutes>') and appends one row to <features root>/.timing.jsonl so later deadline suggestions have
 real numbers. A hand-ticked item is never touched; an item whose task is not found is reported as 'missing', never ticked.
+
+A task that finished with nothing to merge (terminalDisposition 'noop') ticks as 'no change needed'. A hub parent (archived or
+coordinating, with subTasks) ticks only when every one of its pieces is finished; its state names the hub and the pieces done.
 """
 from __future__ import annotations
 
@@ -65,13 +68,57 @@ def _units(entries):
                 yield f"{it['id']}/{p['id']}", it, p, p["meta"]
 
 
+def _piece_complete(state: str | None, rec: dict | None) -> bool:
+    """A hub piece is finished when it is done and merged, or done with nothing to merge (noop)."""
+    if state != "done" or not rec:
+        return False
+    return bool(rec.get("mergedAt")) or rec.get("terminalDisposition") == "noop"
+
+
+def _hub_progress(pipeline: str, rec: dict):
+    """(hub label, pieces finished, pieces total, incomplete piece ids, latest piece merge time or None) for a hub parent."""
+    subs = [str(s) for s in (rec.get("subTasks") or [])]
+    hub = str(rec.get("hubLabel") or "(no hub label)")
+    done, incomplete, merges = 0, [], []
+    for sid in subs:
+        st, pr = find_task(pipeline, sid)
+        if _piece_complete(st, pr):
+            done += 1
+            if pr.get("mergedAt"):
+                merges.append(str(pr["mergedAt"]))
+        else:
+            incomplete.append(sid)
+    return hub, done, len(subs), incomplete, (max(merges) if merges else None)
+
+
+def _classify(state: str, rec: dict, pipeline: str):
+    """(label, reason, tick stamp or None, category) for a task that was found. A None stamp means it does not tick."""
+    disp = rec.get("terminalDisposition")
+    if state == "done" and rec.get("mergedAt"):
+        return "merged", "merged", str(rec["mergedAt"])[:19] + "Z", "merged"
+    if state == "done" and disp == "noop":
+        return "no change needed", "no change needed (terminalDisposition=noop)", "noop", "no change needed"
+    if state == "done" and disp == "pending-merge":
+        return "awaiting merge", "awaiting merge (terminalDisposition=pending-merge)", None, "awaiting merge"
+    if state in ("archived", "coordinating") and rec.get("subTasks"):
+        hub, k, n, incomplete, latest = _hub_progress(pipeline, rec)
+        label = f"hub {hub}, {k} of {n} pieces done"
+        if k == n:
+            return label, label, (latest[:19] + "Z" if latest else "noop"), "hub"
+        return label, f"{label}; incomplete: {', '.join(incomplete)}", None, "hub"
+    if state == "coordinating":
+        return "coordinating, no pieces recorded", "coordinating, no pieces recorded", None, "coordinating"
+    return state, state, None, state
+
+
 def sync(slug: str, root: Path | None = None) -> dict:
-    """Tick merged items and pieces and report every filed task's state: {'ticked': [keys], 'states': {key: {'state', 'status'}}}.
+    """Tick finished items and pieces and report every filed task's state:
+    {'ticked': [keys], 'states': {key: {'state', 'status', 'reason'}}, 'ticked_by_reason': {category: count}}.
     A key is an item id ('FF-4') or a piece ('FF-4/4c'). A step whose pieces are all done after this run is ticked too."""
     text = store.read_file(slug, "checklist.md", root)
     entries = checklist.parse(text)
     units = list(_units(entries))
-    out = {"ticked": [], "states": {}}
+    out = {"ticked": [], "states": {}, "ticked_by_reason": {}}
     if not units:
         return out
     repo = grill.target_repo(slug, root)["name"]
@@ -79,25 +126,27 @@ def sync(slug: str, root: Path | None = None) -> dict:
         return out
     pipeline = filing.project_for(repo)["pipelineDir"]
     rows = []
-    finished: dict[str, list[str]] = {}                 # item id -> merge times of the pieces ticked in this run
+    finished: dict[str, list[str]] = {}                 # item id -> merge times of the pieces merged in this run
     for key, it, piece, meta in units:
         state, rec = find_task(pipeline, meta["task"])
         if state is None:
-            out["states"][key] = {"state": "missing", "status": ""}
+            out["states"][key] = {"state": "missing", "status": "", "reason": "missing"}
             continue
         status = str((rec or {}).get("status", ""))
-        merged = (rec or {}).get("mergedAt")
-        label = "merged" if state == "done" and merged else state
-        out["states"][key] = {"state": label, "status": status}
-        if (piece["ticked"] if piece else it["ticked"]) or label != "merged":
+        label, reason, stamp, category = _classify(state, rec or {}, pipeline)
+        out["states"][key] = {"state": label, "status": status, "reason": reason}
+        if (piece["ticked"] if piece else it["ticked"]) or stamp is None:
             continue
-        mt = _when(merged)
-        ft = _filed_at(meta, rec or {})
-        minutes = max(0, round((mt - ft).total_seconds() / 60)) if mt and ft else None
-        stamp = str(merged)[:19] + "Z"
+        minutes, ft = None, None
+        if category == "merged":
+            mt = _when(rec.get("mergedAt"))
+            ft = _filed_at(meta, rec)
+            minutes = max(0, round((mt - ft).total_seconds() / 60)) if mt and ft else None
+        took = {"took": str(minutes)} if minutes is not None else {}
         if piece:
-            checklist.update_piece(it, piece["id"], dict({"merged": stamp}, **({"took": str(minutes)} if minutes is not None else {})), ticked=True)
-            finished.setdefault(it["id"], []).append(stamp)
+            checklist.update_piece(it, piece["id"], dict({"merged": stamp}, **took), ticked=True)
+            if category == "merged":
+                finished.setdefault(it["id"], []).append(stamp)
         else:
             it["ticked"] = True
             it["meta"]["merged"] = stamp
@@ -105,9 +154,12 @@ def sync(slug: str, root: Path | None = None) -> dict:
                 it["meta"]["took"] = str(minutes)
             it["dirty"] = True
         out["ticked"].append(key)
-        rows.append({"slug": slug, "item": key, "task": meta["task"], "repo": repo, "filed": str(ft) if ft else None,
-                     "merged": str(merged), "minutes": minutes, "premium": it["meta"].get("premium") == "true",
-                     "cloud": it["meta"].get("cloud") == "true"})
+        out["ticked_by_reason"][category] = out["ticked_by_reason"].get(category, 0) + 1
+        if category == "merged":
+            rows.append({"slug": slug, "item": key, "task": meta["task"], "repo": repo, "filed": str(ft) if ft else None,
+                         "merged": str(rec.get("mergedAt")), "minutes": minutes,
+                         "premium": it["meta"].get("premium") == "true",
+                         "cloud": it["meta"].get("cloud") == "true"})
     for it in checklist.items(entries):                 # the last piece of a step merged: the step is done
         if it["id"] in finished and not it["ticked"] and all(p["ticked"] for p in checklist.pieces(it)):
             it["ticked"] = True
