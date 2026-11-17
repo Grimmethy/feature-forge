@@ -9,7 +9,7 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
-from . import checklist, store
+from . import checklist, status, store
 
 COLUMNS = ("Not filed", "In flight", "Done")
 NODE_W, NODE_H, GAP_X, GAP_Y, PAD, TITLE_CAP = 220, 40, 70, 16, 16, 28
@@ -23,6 +23,7 @@ def column(item: dict) -> str:
 
 def board(root: Path | None = None) -> dict:
     """{'columns': {name: [card, ...]}}; a card is {slug, feature, id, title, repo, premium, cloud, took}."""
+    status.sync_all(root)
     cols = {c: [] for c in COLUMNS}
     for f in sorted(store.list_features(root), key=lambda f: -f["updated"]):
         for it in checklist.items(checklist.parse(store.read_file(f["slug"], "checklist.md", root))):
@@ -34,6 +35,7 @@ def board(root: Path | None = None) -> dict:
 
 def by_repo(root: Path | None = None) -> list[dict]:
     """Features grouped by repo, with each group's ticked and total items; features with no repo come last."""
+    status.sync_all(root)
     groups: dict[str, dict] = {}
     for f in store.list_features(root):
         g = groups.setdefault(f["repo"], {"repo": f["repo"], "features": [], "ticked": 0, "total": 0})
