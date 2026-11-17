@@ -207,6 +207,11 @@ def create_app(root: Path | None = None) -> Flask:
         """Read the filed items' task states from the project's queue folders and tick the merged ones. Called when a feature is opened or refreshed."""
         return jsonify(status.sync(slug, froot()))
 
+    @app.post("/api/sync-all")
+    def sync_all():
+        """Tick merged items for every feature on the board. Called on board/library load and once at server start; this endpoint exists so the UI can force a refresh."""
+        return jsonify(status.sync_all(froot()))
+
     @app.post("/api/features/<slug>/checklist/<item_id>/file")
     def checklist_file(slug, item_id):
         accept = (request.get_json(silent=True) or {}).get("acceptLint")
@@ -309,7 +314,10 @@ def create_app(root: Path | None = None) -> Flask:
         text = str((request.get_json(silent=True) or {}).get("message", "")).strip()
         if not text:
             return jsonify({"error": "message is required"}), 400
-        grill.load_meta(slug, sid, froot())
+        meta = grill.load_meta(slug, sid, froot())
+        # Check if the session is failed
+        if meta.get("failed"):
+            return jsonify({"error": "The interviewer was stopped (killed by the system, usually memory pressure). Nothing was lost. Please use the Retry button or start a new session."}), 409
         return _sse(grill.stream_turn(slug, sid, text, froot()))
 
     @app.post("/api/grill/<slug>/<sid>/save")
@@ -319,6 +327,27 @@ def create_app(root: Path | None = None) -> Flask:
     @app.post("/api/grill/<slug>/<sid>/end")
     def grill_end(slug, sid):
         return jsonify(grill.end(slug, sid, froot()))
+
+    @app.post("/api/grill/sessions/<session_id>/retry")
+    def grill_retry(session_id):
+        """Retry a failed session. Returns 409 if the session is not failed or has no last round."""
+        # Find the slug for this session_id
+        for slug_data in store.list_features(froot()):
+            slug = slug_data["slug"]
+            try:
+                meta = grill.load_meta(slug, session_id, froot())
+                # Check if the session is failed
+                if not meta.get("failed"):
+                    return jsonify({"error": "Session is not in a failed state"}), 409
+                last_round = meta["failed"].get("last_round")
+                if not last_round:
+                    return jsonify({"error": "Session has no last round to retry"}), 409
+                # Clear the failed state
+                result = grill.retry_session(slug, session_id, froot())
+                return jsonify(result), 200
+            except grill.GrillError as e:
+                return jsonify({"error": str(e)}), 409
+        return jsonify({"error": "Session not found"}), 404
 
 
     @app.get("/api/proposals")
@@ -403,5 +432,20 @@ def create_app(root: Path | None = None) -> Flask:
 
 app = create_app()
 
+
+def _run_startup_sync():
+    """Tick every feature's merged items once at server start so nothing stays stale."""
+    try:
+        status.sync_all(app.config.get("FEATURE_ROOT"))
+    except Exception:
+        # A broken feature must not crash the server; sync failures are logged, not fatal.
+        import logging
+        logging.getLogger("feature-forge").exception("sync_all on startup failed")
+
+
 if __name__ == "__main__":
+    # Guard against the Flask debug reloader: when werkzeug restarts the process it sets
+    # WERKZEUG_RUN_MAIN so only the reloaded process runs the startup side-effect.
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        _run_startup_sync()
     app.run(host="127.0.0.1", port=int(os.environ.get("FEATUREFORGE_PORT", "7466")), threaded=True)
