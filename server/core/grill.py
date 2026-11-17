@@ -52,6 +52,28 @@ def _parse_exit_signal(message: str) -> tuple[str, str]:
     return (m.group(1), m.group(2)) if m else ("unknown", "unknown")
 
 
+def _read_meminfo() -> dict[str, str]:
+    """Read MemAvailable, SwapTotal, SwapFree from /proc/meminfo; 'unknown' if missing."""
+    result = {"MemAvailable": "unknown", "SwapTotal": "unknown", "SwapFree": "unknown"}
+    try:
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                line = line.strip()
+                for key in result:
+                    if line.startswith(key + ":") and key not in result:
+                        # Value is in kB, may have units after the number
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            try:
+                                result[key] = str(int(parts[1]))
+                            except ValueError:
+                                pass
+                        break
+    except (OSError, IOError):
+        pass
+    return result
+
+
 class GrillError(RuntimeError):
     pass
 
@@ -275,6 +297,14 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
                     frame["retryable"] = True
                     if sig == "SIGKILL":
                         frame["killed"] = True
+                        frame["code"] = "interviewer_killed"
+                        frame["session_id"] = sid
+                        frame["message"] = "The interviewer was stopped (killed by the system, usually memory pressure). Nothing was lost."
+                        frame["last_round"] = turn
+                        # Write a structured log line with memory info
+                        mem_info = _read_meminfo()
+                        print(f"interviewer_killed exit_code={code} signal={sig} MemAvailable={mem_info['MemAvailable']} SwapTotal={mem_info['SwapTotal']} SwapFree={mem_info['SwapFree']}",
+                              file=sys.stderr, flush=True)
                     yield _sse_frame(frame)
                     continue
                 yield line + "\n"
