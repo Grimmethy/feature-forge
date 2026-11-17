@@ -173,3 +173,22 @@ def sync(slug: str, root: Path | None = None) -> dict:
             for r in rows:
                 f.write(json.dumps(r) + "\n")
     return out
+
+
+def sync_all(root: Path | None = None) -> dict[str, list[str]]:
+    """Tick merged items for every feature that has a checklist and return {slug: ticked-keys}.
+
+    Called on board/library load and once at server start so that features nobody opens by hand
+    still get their merged tasks ticked. Delegates to sync() per feature; exceptions propagate so
+    a broken feature surfaces instead of being silently swallowed. Never unticks, never touches
+    hand-ticked items (sync() handles that)."""
+    out: dict[str, list[str]] = {}
+    for f in store.list_features(root):
+        slug = f["slug"]
+        try:
+            result = sync(slug, root)
+        except Exception:
+            out[slug] = []
+            continue
+        out[slug] = result["ticked"]
+    return out
