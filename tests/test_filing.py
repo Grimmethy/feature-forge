@@ -86,6 +86,42 @@ class LintTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(filing.lint(text), [])
 
+    def test_negated_no_poll_is_not_flagged(self):
+        self.assertEqual(filing.lint("add no poll to the worker"), [])
+
+    def test_negated_nothing_polls_is_not_flagged(self):
+        self.assertEqual(filing.lint("nothing polls the queue"), [])
+
+    def test_negated_not_poll_is_not_flagged(self):
+        self.assertEqual(filing.lint("do not poll the queue"), [])
+
+    def test_negated_never_poll_is_not_flagged(self):
+        self.assertEqual(filing.lint("never poll the queue"), [])
+
+    def test_negated_without_polling_is_not_flagged(self):
+        self.assertEqual(filing.lint("without polling, wake on the event"), [])
+
+    def test_negated_does_not_poll_is_not_flagged(self):
+        self.assertEqual(filing.lint("the worker does not poll the queue"), [])
+
+    def test_negated_no_polling_is_not_flagged(self):
+        self.assertEqual(filing.lint("no polling, the file is read on demand"), [])
+
+    def test_negated_instead_of_polling_is_not_flagged(self):
+        self.assertEqual(filing.lint("wake on events instead of polling the queue"), [])
+
+    def test_affirmative_polls_every_5_seconds_warns(self):
+        self.assertTrue(filing.lint("polls the file every 5 seconds"))
+
+    def test_affirmative_worker_polls_the_queue_warns(self):
+        self.assertTrue(filing.lint("the worker polls the queue"))
+
+    def test_affirmative_polls_then_sleeps_warns(self):
+        self.assertTrue(filing.lint("it polls and then sleeps"))
+
+    def test_negation_in_an_earlier_clause_does_not_exempt_a_later_poll(self):
+        self.assertTrue(filing.lint("Nothing else changes; the worker polls the queue"))
+
     def test_an_unnegated_match_still_warns_beside_a_negated_one(self):
         self.assertTrue(filing.lint("do not add a sleep loop, but poll every 5 minutes"))
         self.assertTrue(filing.lint("run a cron job"))
