@@ -129,6 +129,24 @@ function actionsHtml(i){const m=i.meta||{};let h='';
       if(i.lint&&i.lint.length)h+=`<br><small class="warn">Polling language: ${esc(i.lint.join(', '))}. Reword it to use a trigger${armed?', or press File anyway':''}.</small>`}
     else if(m.task)h+=`<br><small>task ${esc(m.task)}${taskStates[i.id]?' · '+esc(taskStates[i.id].state):''}</small>`}
   return h+`<button data-grill="${esc(i.id)}" title="Interview me about just this item">Grill</button>`}
+function checklistAddForm(){return `<form class="nf" id="checklist-add-form"><h3>Add item</h3>
+<label>Title<textarea name="title" required></textarea></label>
+<label>Body<textarea name="body"></textarea></label>
+<label>Premium <small>(optional)</small><input name="premium"></label>
+<label>Deps <small>(optional)</small><input name="deps"></label>
+<div><button class="primary" type="submit">Add item</button></div>
+<small id="checklist-add-error" class="warn"></small></form>`}
+function wireChecklistAdd(){const f=$('checklist-add-form');if(!f)return;
+  f.onsubmit=async ev=>{ev.preventDefault();const err=$('checklist-add-error');err.textContent='';
+    const body={title:f.elements.title.value.trim(),body:f.elements.body.value};
+    const premium=f.elements.premium.value.trim(),deps=f.elements.deps.value.trim();
+    if(premium)body.premium=premium;if(deps)body.deps=deps;
+    try{const r=await fetch('/api/checklist/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const t=await r.text();
+      if(r.status===400){let j=null;try{j=JSON.parse(t)}catch{}err.textContent=(j&&j.error)||t||'Bad request';return}
+      if(!r.ok)throw new Error(r.status);
+      await openFile('checklist.md');
+    }catch(e){toast(e.message)}}}
 function checklistHtml(items){
   if(!items.length)return '<p><small>No checklist items yet.</small></p>';
   return items.map(i=>{const m=i.meta||{};
@@ -149,7 +167,7 @@ async function openFile(path){
   document.querySelectorAll('#tree .f').forEach(e=>e.classList.toggle('on',e.dataset.p===path));
   if(path==='checklist.md'){
     try{const r=await post(`/api/features/${cur}/sync`,{});taskStates=r.states||{};if(r.ticked&&r.ticked.length){toast('Merged: '+r.ticked.join(', '));loadLibrary().catch(()=>{})}}catch(e){taskStates={}}
-    $('view').innerHTML=checklistHtml(await api(`/api/features/${cur}/checklist`));return}
+    $('view').innerHTML=checklistHtml(await api(`/api/features/${cur}/checklist`));$('view').insertAdjacentHTML('beforeend',checklistAddForm());wireChecklistAdd();return}
   const r=await api(`/api/features/${cur}/render?path=${encodeURIComponent(path)}`);$('view').innerHTML=r.html;
 }
 async function startEdit(){
