@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -43,6 +44,34 @@ def _is_timeout(exc: BaseException) -> bool:
             return True
         seen = seen.__cause__ or seen.__context__
     return False
+
+
+def _parse_exit_signal(message: str) -> tuple[str, str]:
+    """Pull (exit, signal) out of 'claude -p failed: exit=<code> signal=<name> ...'; 'unknown' when absent."""
+    m = re.search(r"exit=(\S+) signal=(\S+)", message or "")
+    return (m.group(1), m.group(2)) if m else ("unknown", "unknown")
+
+
+def _read_meminfo() -> dict[str, str]:
+    """Read MemAvailable, SwapTotal, SwapFree from /proc/meminfo; 'unknown' if missing."""
+    result = {"MemAvailable": "unknown", "SwapTotal": "unknown", "SwapFree": "unknown"}
+    try:
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                line = line.strip()
+                for key in result:
+                    if line.startswith(key + ":") and key not in result:
+                        # Value is in kB, may have units after the number
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            try:
+                                result[key] = str(int(parts[1]))
+                            except ValueError:
+                                pass
+                        break
+    except (OSError, IOError):
+        pass
+    return result
 
 
 class GrillError(RuntimeError):
@@ -246,8 +275,39 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
         meta["turns"] = turn
         save_meta(slug, meta, root)
         with resp:
+            failed_seen = False
             for raw in resp:
-                yield (raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw).rstrip("\r\n") + "\n"
+                line = (raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw).rstrip("\r\n")
+                frame = None
+                if line.startswith("data:"):
+                    try:
+                        frame = json.loads(line[5:].strip())
+                    except ValueError:
+                        frame = None
+                if isinstance(frame, dict) and frame.get("type") == "error":
+                    msg = str(frame.get("error") or frame.get("message") or "")
+                    code, sig = _parse_exit_signal(msg)
+                    if not failed_seen:
+                        failed_seen = True
+                        meta["failed"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "exit": code, "signal": sig,
+                                          "message": msg[:300], "last_round": turn}
+                        save_meta(slug, meta, root)
+                        print(f"[grill] turn failed slug={slug} sid={sid} turn={turn} exit={code} signal={sig}",
+                              file=sys.stderr, flush=True)
+                    frame["retryable"] = True
+                    if sig == "SIGKILL":
+                        frame["killed"] = True
+                        frame["code"] = "interviewer_killed"
+                        frame["session_id"] = sid
+                        frame["message"] = "The interviewer was stopped (killed by the system, usually memory pressure). Nothing was lost."
+                        frame["last_round"] = turn
+                        # Write a structured log line with memory info
+                        mem_info = _read_meminfo()
+                        print(f"interviewer_killed exit_code={code} signal={sig} MemAvailable={mem_info['MemAvailable']} SwapTotal={mem_info['SwapTotal']} SwapFree={mem_info['SwapFree']}",
+                              file=sys.stderr, flush=True)
+                    yield _sse_frame(frame)
+                    continue
+                yield line + "\n"
     except Exception as e:
         if terminal_sent:
             return
@@ -258,6 +318,21 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
             message_text = f"model call failed: {e}"
         yield _sse_frame({"type": "error", "turn": turn, "message": message_text, "retryable": True})
         return
+
+
+def retry_session(slug: str, sid: str, root: Path | None = None) -> dict:
+    """Check if a session can be retried. Returns the last round info and clears the failed state."""
+    meta = load_meta(slug, sid, root)
+    failed = meta.get("failed")
+    if not failed:
+        raise GrillError("session is not in a failed state")
+    last_round = failed.get("last_round")
+    if not last_round:
+        raise GrillError("session has no last round to retry")
+    # Clear the failed state
+    meta.pop("failed", None)
+    save_meta(slug, meta, root)
+    return {"session_id": sid, "round": last_round}
 
 
 def extract_proposal(text: str) -> dict:
