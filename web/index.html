@@ -224,7 +224,7 @@ async function showProposals(){
   plainView('Proposals');
   try{
     const repos=await api('/api/proposals');
-    if(!repos.length){$('view').innerHTML='<p><small>No proposals yet.</small></p>';return}
+    if(!repos.length){const t='No proposals yet.';if(t){const p=document.createElement('p'),s=document.createElement('small');s.textContent=t;p.appendChild(s);$('view').replaceChildren(p)}return}
     let html='<div class="prop-list">';
     for(const repo of repos){
       const props=repo.proposals||[];
@@ -233,7 +233,7 @@ async function showProposals(){
       html+=`<div class="prop-grp" data-repo="${esc(repo.repo)}">
         <h3>${esc(repo.repo||'(unnamed)')} <small>value: ${repo.value??0} · scouted ${repo.scoutedAt||'?'}</small></h3>
         <p><small>${esc(repo.summary||'')}</small></p>`;
-      if(!props.length){html+='<p><small>No proposals.</small></p>'}
+      if(!props.length){html+='<p class="prop-empty"><small></small></p>'}
       else{
         html+='<ul class="prop-items">';
         for(const p of active){html+=renderPropItem(p,repo.repo,false)}
@@ -243,7 +243,8 @@ async function showProposals(){
       html+='</div>'
     }
     html+='</div>';
-    $('view').innerHTML=html
+    $('view').innerHTML=html;
+    $('view').querySelectorAll('.prop-empty small').forEach(s=>{const t='No proposals.';if(t){s.textContent=t}})
   }catch(e){toast('Failed to load proposals: '+e.message)}
 }
 
