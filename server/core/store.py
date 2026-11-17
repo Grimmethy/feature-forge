@@ -154,6 +154,52 @@ def _request_info(slug: str, root: Path | None) -> tuple[str, str]:
     return title, (repo.group(1) if repo else "")
 
 
+TAGS_RE = re.compile(r"^\s*tags\s*:\s*(.*)$", re.I)
+
+
+def _parse_tags(text: str) -> list[str]:
+    """First 'tags:' line -> lowercased, trimmed, de-duplicated tags in first-seen order. [] when absent."""
+    for line in text.splitlines():
+        m = TAGS_RE.match(line)
+        if m:
+            tags: list[str] = []
+            for part in m.group(1).split(","):
+                t = part.strip().lower()
+                if t and t not in tags:
+                    tags.append(t)
+            return tags
+    return []
+
+
+def _request_tags(slug: str, root: Path | None) -> list[str]:
+    try:
+        return _parse_tags(read_file(slug, "request.md", root))
+    except StoreError:
+        return []
+
+
+def all_tags(root: Path | None = None) -> list[dict]:
+    """Sorted [{tag, count}]. A feature tagged a/b/c counts once toward a, a/b and a/b/c."""
+    counts: dict[str, int] = {}
+    for f in list_features(root):
+        seen: set[str] = set()
+        for t in f["tags"]:
+            parts = t.split("/")
+            for i in range(1, len(parts) + 1):
+                seen.add("/".join(parts[:i]))
+        for t in seen:
+            counts[t] = counts.get(t, 0) + 1
+    return [{"tag": t, "count": counts[t]} for t in sorted(counts)]
+
+
+def tag_matches(feature_tags: list[str], selected: list[str]) -> bool:
+    """True when every selected tag equals a feature tag or is a '/'-prefix of one."""
+    for s in selected:
+        if not any(f == s or f.startswith(s + "/") for f in feature_tags):
+            return False
+    return True
+
+
 def list_features(root: Path | None = None) -> list[dict]:
     base = _root(root)
     if not base.is_dir():
@@ -165,5 +211,6 @@ def list_features(root: Path | None = None) -> list[dict]:
         done, total = progress(items)
         updated = max((f.stat().st_mtime for f in d.glob("*.md")), default=d.stat().st_mtime)
         out.append({"slug": d.name, "title": title, "status": derive_status(items), "ticked": done,
-                    "total": total, "repo": repo, "updated": updated})
+                    "total": total, "repo": repo, "updated": updated,
+                    "tags": _request_tags(d.name, root)})
     return out
