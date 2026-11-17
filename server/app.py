@@ -247,8 +247,15 @@ def create_app(root: Path | None = None) -> Flask:
         title = body.get("title")
         if not isinstance(title, str) or not title.strip():
             return jsonify({"error": "title is required"}), 400
+        raw_premium = body.get("premium", False)
+        if isinstance(raw_premium, bool):
+            premium = raw_premium
+        elif isinstance(raw_premium, str) and raw_premium.strip().lower() in ("true", "false"):
+            premium = raw_premium.strip().lower() == "true"
+        else:
+            return jsonify({"error": 'premium must be a boolean or the string "true" or "false"'}), 400
         item = checklist.add_item(slug, title.strip(), str(body.get("body", "")),
-                                  list(body.get("deps", [])), bool(body.get("premium", False)), froot())
+                                  list(body.get("deps", [])), premium, froot())
         return jsonify({"id": item["id"], "item": item}), 201
 
     @app.post("/api/grill/<slug>/<sid>/proposal")
