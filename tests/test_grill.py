@@ -161,8 +161,11 @@ class SessionTests(GrillTestBase):
         slug = self.feature()
         grill.start(slug, root=self.root)
         grill._urlopen = FakeChat(fail=True)
-        (line,) = [ln for ln in grill.stream_turn(slug, "chat-1-abc", "hi", self.root) if ln.strip()]
-        self.assertEqual(json.loads(line[len("data: "):])["type"], "error")
+        # stream_turn now yields a turn-start frame before the model call, so the stream is [turn-start, error], not one line.
+        # Equally strict check: the types are exactly turn-start then a single error, and nothing follows the error.
+        lines = [ln for ln in grill.stream_turn(slug, "chat-1-abc", "hi", self.root) if ln.strip()]
+        types = [json.loads(ln[len("data: "):])["type"] for ln in lines]
+        self.assertEqual(types, ["turn-start", "error"])
 
     def test_bad_session_ids_are_rejected(self):
         slug = self.feature()
