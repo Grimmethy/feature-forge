@@ -241,6 +241,16 @@ def create_app(root: Path | None = None) -> Flask:
     def checklist_number(slug):
         return jsonify(checklist.number_checklist(slug, froot()))
 
+    @app.post("/api/features/<slug>/checklist/items")
+    def checklist_add_item(slug):
+        body = request.get_json(silent=True) or {}
+        title = body.get("title")
+        if not isinstance(title, str) or not title.strip():
+            return jsonify({"error": "title is required"}), 400
+        item = checklist.add_item(slug, title.strip(), str(body.get("body", "")),
+                                  list(body.get("deps", [])), bool(body.get("premium", False)), froot())
+        return jsonify({"id": item["id"], "item": item}), 201
+
     @app.post("/api/grill/<slug>/<sid>/proposal")
     def grill_proposal(slug, sid):
         proposal = grill.proposal_from_session(slug, sid, froot())

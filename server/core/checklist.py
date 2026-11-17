@@ -165,6 +165,16 @@ def next_id(entries: list[dict]) -> str:
     return f"FF-{max(nums, default=0) + 1}"
 
 
+def next_free_id(items: list[dict]) -> str:
+    """'FF-(max+1)' over the FF-<n> ids in items; 'FF-1' when there are none. Id-less lines are not items, so they are ignored."""
+    nums = []
+    for i in items:
+        m = re.fullmatch(r"FF-(\d+)", str(i.get("id") or ""))
+        if m:
+            nums.append(int(m.group(1)))
+    return f"FF-{max(nums, default=0) + 1}"
+
+
 IDLESS_RE = re.compile(r"^- \[( |x|X)\] (\S.*)$")          # a top-level checkbox line with no FF-n id
 
 
@@ -203,6 +213,26 @@ def number_checklist(slug: str, root: Path | None = None) -> dict:
     if assigned:
         store.write_file(slug, "checklist.md", new_text, root)
     return {"assigned": assigned, "items": len(store.parse_checklist_text(new_text))}
+
+
+def add_item(slug: str, title, body, premium=None, deps=None, root: Path | None = None) -> str:
+    """Append a new item to a feature's checklist.md and return its id. The write goes through store.write_file, which keeps the history copy."""
+    if title is None or not str(title).strip():
+        raise ValueError("title must not be blank")
+    try:
+        text = store.read_file(slug, "checklist.md", root)
+    except store.StoreError as e:
+        raise ValueError(f"feature '{slug}' not found: {e}") from e
+    entries = parse(text)
+    new_id = next_free_id(items(entries))
+    try:
+        item = _new_item(entries, {"title": title, "body": body, "premium": premium, "deps": deps})
+    except ChecklistError as e:
+        raise ValueError(str(e)) from e
+    item["id"] = new_id
+    entries.append(item)
+    store.write_file(slug, "checklist.md", render(entries), root)
+    return new_id
 
 
 # ---- checks ------------------------------------------------------------------------------------------------------
