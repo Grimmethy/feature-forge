@@ -30,7 +30,9 @@ When the owner has confirmed the plan, end your reply with ONE fenced block tagg
    "pieces": [{"title": "first task", "body": "full self-contained task text, files, acceptance"}, {"title": "second task", "body": "..."}]},
   {"op": "change", "id": "FF-3", "title": "...", "body": "...", "pieces": [{"title": "one more task", "body": "..."}]},
   {"op": "split", "id": "FF-4", "into": [{"title": "...", "body": "..."}, {"title": "...", "body": "..."}]},
-  {"op": "remove", "id": "FF-5"}
+  {"op": "remove", "id": "FF-5"},
+  {"op": "remove", "id": "FF-4", "piece": "4c"},
+  {"op": "supersede", "id": "FF-4", "piece": "4c", "reason": "done by another step"}
 ]}
 ```
 
@@ -38,6 +40,7 @@ Rules for the block:
 - A step is a heading for the owner; the TASKS are its `pieces`. Any step that needs more than one task gets `pieces`, one per task, in the order they will be built (labelled 4a, 4b... for you). Each piece's `body` is the full task text a worker will see: it must stand alone. A step that is a single task may have no pieces and put its task text in `body`. `change` with `pieces` appends new pieces; it never touches existing ones.
 - Prefer more, smaller tasks. Each task text must stand alone: a worker sees only its own repo, so name the files, the tests and the acceptance check in the body.
 - Filed items (their line has a task or filed key) can only be reworded with `change`; never split or remove them.
+- To close ONE piece nobody will build, use the piece ops, not a step `remove`: `remove` with `piece` drops it, `supersede` (with a one-line `reason`) ticks it as done by hand. A piece with a task, filed or merged tag is never dropped or superseded. When every piece left in the step is ticked, the step is ticked too.
 - Every dependency must be an existing item; no cycles. A split's parts chain one after another unless you give `deps`.
 - For every task answer "what event could trigger this instead of a timer?" and say so in the body; a poll or timer needs a written justification there.
 - Propose nothing the owner has not confirmed. The page shows the block as a preview; the owner accepts each operation before anything is written.
