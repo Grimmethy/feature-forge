@@ -111,7 +111,7 @@ class TabScriptBehaviourTest(unittest.TestCase):
                 self.assertLocal(run_tab(plugins=[{"name": "featureforge", "url": url}]))
 
     def test_unusable_urls_keep_the_local_behaviour(self):
-        for url in ("not a url", "javascript:alert(1)", "ftp://100.80.1.14:7466"):
+        for url in ("not a url", "javascript:alert(1)", "ftp://100.64.0.1:7466"):
             with self.subTest(url=url):
                 self.assertLocal(run_tab(plugins=[{"name": "featureforge", "url": url}]))
 
@@ -121,29 +121,29 @@ class TabScriptBehaviourTest(unittest.TestCase):
                 self.assertLocal(run_tab(pluginsMode=mode))
 
     def test_a_remote_entry_is_embedded_without_starting_anything_locally(self):
-        r = run_tab(plugins=[{"name": "featureforge", "url": "http://100.80.1.14:7466"}])
+        r = run_tab(plugins=[{"name": "featureforge", "url": "http://100.64.0.1:7466"}])
         self.assertNotIn(ENSURE, r["calls"])
-        self.assertEqual(r["src"], "http://100.80.1.14:7466/")
+        self.assertEqual(r["src"], "http://100.64.0.1:7466/")
 
     def test_a_remote_url_ends_in_exactly_one_slash_and_keeps_a_path_prefix(self):
-        for url, want in (("http://100.80.1.14:7466/", "http://100.80.1.14:7466/"), ("http://wok:7466/ff//", "http://wok:7466/ff/")):
+        for url, want in (("http://100.64.0.1:7466/", "http://100.64.0.1:7466/"), ("http://wok:7466/ff//", "http://wok:7466/ff/")):
             with self.subTest(url=url):
                 r = run_tab(plugins=[{"name": "featureforge", "url": url}])
                 self.assertEqual(r["src"], want)
 
     def test_remote_entry_is_selected_by_name_not_position(self):
-        r = run_tab(plugins=[{"name": "mailroom", "url": "http://100.96.112.78:7464"}, {"name": "featureforge", "url": "http://100.80.1.14:7466"}])
+        r = run_tab(plugins=[{"name": "mailroom", "url": "http://100.64.0.2:7464"}, {"name": "featureforge", "url": "http://100.64.0.1:7466"}])
         self.assertNotIn(ENSURE, r["calls"])
-        self.assertEqual(r["src"], "http://100.80.1.14:7466/")
+        self.assertEqual(r["src"], "http://100.64.0.1:7466/")
 
     def test_other_plugins_urls_are_ignored(self):
-        self.assertLocal(run_tab(plugins=[{"name": "mailroom", "url": "http://100.96.112.78:7464"}]))
+        self.assertLocal(run_tab(plugins=[{"name": "mailroom", "url": "http://100.64.0.2:7464"}]))
 
     def test_a_hostile_remote_url_never_puts_a_raw_quote_or_tag_in_the_markup(self):
-        r = run_tab(plugins=[{"name": "featureforge", "url": 'http://100.80.1.14:7466/"><script>alert(1)</script>'}])
+        r = run_tab(plugins=[{"name": "featureforge", "url": 'http://100.64.0.1:7466/"><script>alert(1)</script>'}])
         self.assertNotIn("<script", r["html"])
         self.assertNotIn('"><', r["html"].split("<iframe", 1)[1].split("</iframe>", 1)[0].split(' style=')[0])
-        self.assertTrue(r["src"].startswith("http://100.80.1.14:7466/"))
+        self.assertTrue(r["src"].startswith("http://100.64.0.1:7466/"))
 
     def test_the_local_failure_message_is_kept_and_escaped(self):
         r = run_tab(plugins=[], ensureOk=False, ensureError="<b>boom</b>")
