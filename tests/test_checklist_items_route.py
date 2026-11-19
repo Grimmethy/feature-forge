@@ -10,11 +10,17 @@ from pathlib import Path
 
 repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root))
+_skip_reason = "flask and markdown are not installed"
 try:
     from server import app as appmod
     from server.core import checklist, grill, store
-except ImportError:
-    appmod = None
+except ImportError as _e:
+    _missing = getattr(_e, "name", None)
+    if _missing in ("flask", "markdown") or (_missing and _missing.startswith("flask.")):
+        appmod = None
+        _skip_reason = f"{_missing} is not installed"
+    else:
+        raise
 
 
 EMPTY_CHECKLIST = "# Checklist: Thing\n"
@@ -33,7 +39,7 @@ class FakeChat:
         return io.BytesIO(b"{}")
 
 
-@unittest.skipIf(appmod is None, "flask and markdown are not installed")
+@unittest.skipIf(appmod is None, _skip_reason)
 class ChecklistItemsRouteTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
