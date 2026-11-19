@@ -5,6 +5,9 @@ A proposal is {"ops": [...]} with operations:
   {"op": "change", "id": "FF-3", "title": ..., "body": ..., "deps": [...], "pieces": [...]}   (only the keys given change; pieces are appended)
   {"op": "split",  "id": "FF-3", "into": [{"title": ..., "body": ..., "deps": [...]}, ...]}
   {"op": "remove", "id": "FF-3"}
+  {"op": "remove", "id": "FF-3", "piece": "3c"}                      (drops ONE piece; a piece carrying a task:, filed: or merged: tag is refused)
+  {"op": "supersede", "id": "FF-3", "piece": "3c", "reason": "..."}   (ticks ONE untagged piece as done by hand: 'manual: true superseded: <reason>')
+When a piece op leaves the item with pieces that are all ticked, the item is ticked too ('manual: true').
 
 Filed items are locked: they can be changed (the item then carries 'changed: <date>' so the page can say "changed since
 filing"; its task id and filing stamp are never touched) but never split or removed. preview() says what each op would do;
@@ -25,7 +28,8 @@ from .checklist_pieces import join_item_body, split_item_body, next_piece_label,
 META_ORDER = ("task", "premium", "cloud", "deps", "after", "filed", "manual", "merged", "changed")
 TITLE_CAP = 120
 BODY_CAP = 6000
-OPS = ("add", "change", "split", "remove")
+OPS = ("add", "change", "split", "remove", "supersede")
+REASON_CAP = 120
 
 
 class ChecklistError(RuntimeError):
@@ -365,8 +369,52 @@ def _do_change(entries, op):
     return f"change {it['id']}" + (" (filed: marked changed since filing)" if is_locked(it) else "")
 
 
+def _clean_reason(reason) -> str:
+    text = " ".join(str(reason or "").split())
+    if not text:
+        raise ChecklistError("a supersede needs a reason")
+    if len(text) > REASON_CAP or "<!--" in text or "-->" in text or any(tok.endswith(":") for tok in text.split()):
+        raise ChecklistError(f"the reason must be at most {REASON_CAP} characters, with no comment marks and no word ending in a colon")
+    return text
+
+
+def _piece_op(it, op, supersede: bool) -> str:
+    """Drop or supersede ONE piece of an item. The tagged-piece guard runs on the blocks before and after, so a piece with a task:, filed: or merged: tag is refused."""
+    from .checklist_guard import assert_tagged_pieces_kept  # lazy import to avoid cycle with checklist.py
+    piece_id = str(op.get("piece") or "").strip()
+    as_text = lambda: "".join(line + "\n" for line in it["body"])
+    lead, before = split_item_body(as_text())
+    if piece_id not in [p["id"] for p in pieces(it)]:
+        raise ChecklistError(f"item {it['id']} has no piece {piece_id!r}")
+    if supersede:
+        if next(p for p in pieces(it) if p["id"] == piece_id)["ticked"]:
+            raise ChecklistError(f"piece {piece_id} is already ticked")
+        update_piece(it, piece_id, {"manual": "true", "superseded": _clean_reason(op.get("reason"))}, ticked=True)
+        after = split_item_body(as_text())[1]
+    else:
+        after = [b for b in before if next((p["id"] for p in pieces({"body": b.rstrip("\n").split("\n")})), None) != piece_id]
+        new_text = join_item_body(lead, after)
+        it["body"] = new_text.split("\n")[:-1] if new_text else []
+    assert_tagged_pieces_kept(it["id"], before, after)
+    rest = pieces(it)
+    step = bool(rest) and all(p["ticked"] for p in rest) and not it["ticked"]
+    if step:
+        it["ticked"] = True
+        it["meta"]["manual"] = "true"
+    if is_locked(it):
+        it["meta"]["changed"] = time.strftime("%Y-%m-%d")
+    it["dirty"] = True
+    return f"{'supersede' if supersede else 'drop'} piece {piece_id} of {it['id']}" + (f" ({it['id']} ticked: every piece is done)" if step else "")
+
+
+def _do_supersede(entries, op):
+    return _piece_op(_find(entries, op.get("id")), op, True)
+
+
 def _do_remove(entries, op):
     it = _find(entries, op.get("id"))
+    if op.get("piece") is not None:
+        return _piece_op(it, op, False)
     if is_locked(it):
         raise ChecklistError(f"{it['id']} is filed and cannot be removed")
     for other in items(entries):
@@ -402,7 +450,7 @@ def _do_split(entries, op):
     return f"split {it['id']} into " + ", ".join(c["id"] for c in created)
 
 
-DISPATCH = {"add": _do_add, "change": _do_change, "remove": _do_remove, "split": _do_split}
+DISPATCH = {"add": _do_add, "change": _do_change, "remove": _do_remove, "split": _do_split, "supersede": _do_supersede}
 
 
 def _run(entries: list[dict], ops: list, only: set[int] | None):
