@@ -87,6 +87,22 @@ class RepoTests(GrillTestBase):
         t = grill.target_repo(none, self.root, self.repos)
         self.assertEqual((t["name"], t["exists"]), ("brand-new", False))
 
+    def test_repo_index_skips_pipeline_manual_backup_and_scratch_suffixes(self):
+        for name in ("agent-manager-pipeline-ops", "agent-manager-pipeline-ops-pipeline", "X-manual", "X-BACKUP",
+                     "X-hub-p3", "X-wake-others", "X-test-tmp", "normal-repo"):
+            self.make_repo(name)
+        names = {r["name"] for r in grill.repo_index(self.repos)}
+        self.assertEqual(names, {"agent-manager-pipeline-ops", "normal-repo"})
+
+    def test_skip_repo_regex_directly(self):
+        for name in ("X-manual", "X-BACKUP", "X-backup", "X-hub-p3", "X-wake-others", "X-test-tmp",
+                     "agent-manager-pipeline-ops-pipeline"):
+            with self.subTest(name=name):
+                self.assertTrue(grill.SKIP_REPO.search(name))
+        for name in ("agent-manager-pipeline-ops", "normal-repo"):
+            with self.subTest(name=name):
+                self.assertIsNone(grill.SKIP_REPO.search(name))
+
 
 class SeedTests(GrillTestBase):
     def test_no_repo_chosen_asks_for_the_repo_first_and_lists_repos(self):
