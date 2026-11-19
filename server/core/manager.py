@@ -196,5 +196,71 @@ def tick(root: Path | None = None, now: datetime | None = None, run_mode: str | 
     return {"result": "idle"}
 
 
+QUEUES = ("adhoc", "pending", "blocked", "needs-clarification", "done")
+
+
+def watch_paths(root: Path | None = None) -> list[str]:
+    """Files and folders the manager reads: each checklist.md, the queue folders of each filed target repo, the disabled marker. Pure read."""
+    r = _root(root)
+    paths = {str(r / ".manager-disabled")}
+    for f in store.list_features(root):
+        slug = f["slug"]
+        paths.add(str(r / slug / "checklist.md"))
+        try:
+            repo = grill.target_repo(slug, root)["name"]
+            if not repo:
+                continue
+            pipeline = Path(filing.project_for(repo)["pipelineDir"])
+        except (store.StoreError, filing.FilingError):
+            continue
+        paths.update(str(pipeline / "queue" / q) for q in QUEUES)
+    return sorted(paths)
+
+
+def next_due(root: Path | None = None, now: datetime | None = None) -> str | None:
+    """Earliest future ISO time a filed unticked task crosses a threshold decide() acts on; None if none. Pure read."""
+    now = now or datetime.now(timezone.utc)
+    deadline = deadline_minutes(root)
+    best = None
+    for c in candidates(root):
+        if c["filed"] is None:
+            continue
+        mins = []
+        if c["label"] in UNCLAIMED and c["meta"].get("premium") != "true" and not c["meta"].get("bumped"):
+            mins.append(UNCLAIMED_MIN)
+        if c["label"] in STALLED:
+            mins.append(STALLED_MIN)
+        if deadline is not None and c["label"] is not None and c["label"] not in ("done", "archived"):
+            mins.append(deadline)
+        for m in mins:
+            t = c["filed"] + timedelta(minutes=m)
+            if t > now and (best is None or t < best):
+                best = t
+    return best.strftime("%Y-%m-%dT%H:%M:%SZ") if best else None
+
+
+def main(argv=None) -> int:
+    import argparse
+    ap = argparse.ArgumentParser(prog="python -m server.core.manager")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--tick", action="store_true")
+    g.add_argument("--watch-paths", action="store_true")
+    g.add_argument("--next-due", action="store_true")
+    ap.add_argument("root", nargs="?")
+    a = ap.parse_args(argv)
+    root = Path(a.root) if a.root else None
+    try:
+        if a.watch_paths:
+            out = watch_paths(root)
+        elif a.next_due:
+            out = next_due(root)
+        else:
+            out = tick(root)
+    except Exception as e:  # the CLI always exits 0; the error goes in the JSON
+        out = {"error": str(e)}
+    print(json.dumps(out))
+    return 0
+
+
 if __name__ == "__main__":
-    print(json.dumps(tick(Path(sys.argv[1]) if len(sys.argv) > 1 else None)))
+    sys.exit(main())

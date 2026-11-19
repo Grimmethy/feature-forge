@@ -1,5 +1,6 @@
 """Tests for server/core/manager.py: the pure decision table, then ticks over a temp project queue with a fake queue script and
 dashboard: modes, the write-ahead ledger, no repeats, each action. Plain unittest, standard library only."""
+import contextlib
 import io
 import json
 import os
@@ -9,6 +10,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from server.core import checklist, filing, manager, store
@@ -294,6 +296,109 @@ class DeadlineTests(Base):
         self.assertIsNone(manager.deadline_minutes(self.root))
         log.write_text("".join(json.dumps({"minutes": m}) + "\n" for m in (10, 20, 30, 40, 50, 60, 70, 80, 90, 100)))
         self.assertEqual(manager.deadline_minutes(self.root), 110)
+
+
+class WatchAndDueTests(Base):
+    def set_filed(self, minutes_ago, ticked=False, with_task=True):
+        filed = (NOW - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        box = "x" if ticked else " "
+        task = "task: t-pend " if with_task else ""
+        store.write_file(self.slug, "checklist.md", f"# Checklist: Thing\n\n- [{box}] FF-1 One <!-- {task}filed: {filed} deps: -->\n", self.root)
+
+    def snapshot(self):
+        return sorted((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in self.tmp.rglob("*") if p.is_file())
+
+    def run_cli(self, *args):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = manager.main(list(args))
+        return code, buf.getvalue()
+
+    def test_watch_paths_lists_checklists_queues_and_marker(self):
+        paths = manager.watch_paths(self.root)
+        self.assertIn(str(self.root / self.slug / "checklist.md"), paths)
+        for q in ("adhoc", "pending", "blocked", "needs-clarification", "done"):
+            self.assertIn(str(self.pipe / "queue" / q), paths)
+        self.assertIn(str(self.root / ".manager-disabled"), paths)
+        self.assertEqual(paths, sorted(set(paths)))
+
+    def test_watch_paths_writes_nothing(self):
+        before = self.snapshot()
+        manager.watch_paths(self.root)
+        self.assertEqual(before, self.snapshot())
+
+    def test_next_due_future_threshold(self):
+        self.set_filed(10)
+        self.put("pending", "t-pend", {"status": "pending"})
+        self.assertEqual(manager.next_due(self.root, NOW), "2026-11-14T12:20:00Z")
+
+    def test_next_due_earliest_wins(self):
+        self.set_filed(10)
+        self.put("pending", "t-pend", {"status": "pending"})
+        (self.root / ".timing.jsonl").write_text("".join(json.dumps({"minutes": 10}) + "\n" for _ in range(10)))
+        self.assertEqual(manager.next_due(self.root, NOW), "2026-11-14T12:10:00Z")
+
+    def test_next_due_null_when_no_tasks(self):
+        self.set_filed(10, with_task=False)
+        self.assertIsNone(manager.next_due(self.root, NOW))
+
+    def test_next_due_null_when_all_ticked(self):
+        self.set_filed(10, ticked=True)
+        self.put("pending", "t-pend", {"status": "pending"})
+        self.assertIsNone(manager.next_due(self.root, NOW))
+
+    def test_next_due_all_past_is_null(self):
+        self.set_filed(150)
+        self.put("pending", "t-pend", {"status": "pending"})
+        self.assertIsNone(manager.next_due(self.root, NOW))
+
+    def test_next_due_past_threshold_skipped(self):
+        self.set_filed(50)
+        self.put("blocked", "t-pend", {"status": "blocked"})
+        self.assertEqual(manager.next_due(self.root, NOW), "2026-11-14T13:10:00Z")
+        (self.root / ".timing.jsonl").write_text("".join(json.dumps({"minutes": 20}) + "\n" for _ in range(10)))   # deadline 40: already past
+        self.assertEqual(manager.next_due(self.root, NOW), "2026-11-14T13:10:00Z")
+
+    def test_next_due_writes_nothing(self):
+        self.set_filed(10)
+        self.put("pending", "t-pend", {"status": "pending"})
+        before = self.snapshot()
+        manager.next_due(self.root, NOW)
+        self.assertEqual(before, self.snapshot())
+
+    def test_cli_tick_one_json_line_exit_0(self):
+        code, out = self.run_cli("--tick", str(self.root))
+        self.assertEqual(code, 0)
+        self.assertEqual(out.count("\n"), 1)
+        self.assertTrue(out.endswith("\n"))
+        self.assertIn(json.loads(out)["result"], ("handled", "idle", "off"))
+
+    def test_cli_watch_paths_one_json_line(self):
+        code, out = self.run_cli("--watch-paths", str(self.root))
+        self.assertEqual(code, 0)
+        self.assertEqual(out.count("\n"), 1)
+        self.assertEqual(json.loads(out), manager.watch_paths(self.root))
+
+    def test_cli_next_due_one_json_line(self):
+        filed = (datetime.now(timezone.utc) - timedelta(minutes=10)).replace(microsecond=0)
+        store.write_file(self.slug, "checklist.md", f"# Checklist: Thing\n\n- [ ] FF-1 One <!-- task: t-pend filed: {filed.strftime('%Y-%m-%dT%H:%M:%SZ')} deps: -->\n", self.root)
+        self.put("pending", "t-pend", {"status": "pending"})
+        code, out = self.run_cli("--next-due", str(self.root))
+        self.assertEqual(code, 0)
+        self.assertEqual(out.count("\n"), 1)
+        self.assertEqual(json.loads(out), (filed + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+    def test_cli_next_due_null_prints_null(self):
+        self.set_filed(10, with_task=False)
+        code, out = self.run_cli("--next-due", str(self.root))
+        self.assertEqual((code, out), (0, "null\n"))
+
+    def test_cli_tick_error_exit_0_with_error_key(self):
+        with mock.patch.object(manager, "tick", side_effect=RuntimeError("boom")):
+            code, out = self.run_cli("--tick", str(self.root))
+        self.assertEqual(code, 0)
+        self.assertEqual(out.count("\n"), 1)
+        self.assertIn("boom", json.loads(out)["error"])
 
 
 if __name__ == "__main__":
