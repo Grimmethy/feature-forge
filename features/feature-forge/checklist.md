@@ -12,20 +12,20 @@
   - [x] 3b1 Item grills and checklist-diff proposals in the grill core <!-- merged: ee78755 -->
   - [x] 3b2 Checklist and proposal routes <!-- merged: 27fb0d3 -->
   - [x] 3c Checklist rows with item Grill buttons and proposal review <!-- merged: 152ddcf -->
-- [ ] FF-4 Filing, polling lint, premium and cloud toggles, Sonnet lane entry <!-- deps: FF-3 -->
+- [x] FF-4 Filing, polling lint, premium and cloud toggles, Sonnet lane entry <!-- deps: FF-3 manual: true -->
   - [x] 4a Filing core: polling lint, standard trigger clause, file an item <!-- merged: f02d0e5 -->
   - [x] 4b Filing routes and the File, Premium and Cloud buttons <!-- merged: 762078b -->
-  - [ ] 4c Dedicated Sonnet cloud lane: second gateway, lane entry, class routing <!-- needs: owner decision -->
+  - [x] 4c Dedicated Sonnet cloud lane: second gateway, lane entry, class routing <!-- manual: true needs: owner decision superseded: superseded by owner decision 2026-11-18 -->
 - [x] FF-5 Status sync (auto-tick) and timing data <!-- deps: FF-4 manual: true merged: 4c23ac9 -->
   - [x] 5a Status sync: tick merged items, task states, timing log <!-- merged: 4c23ac9 -->
 - [x] FF-6 Board, Graph, By-repo views <!-- deps: FF-5 manual: true merged: e9f3f6b -->
   - [x] 6a Board, by-repo roll-up and dependency graph, with routes <!-- merged: 75794e9 -->
   - [x] 6b Board, By repo and Graph in the page <!-- merged: e9f3f6b -->
-- [ ] FF-7 Manager loop (15 min dry run) and repo-creation button <!-- deps: FF-5 -->
+- [x] FF-7 Manager loop (15 min dry run) and repo-creation button <!-- deps: FF-5 manual: true -->
   - [x] 7a Repo creation: plan and confirm-gated create routes <!-- merged: 1e23825 -->
   - [x] 7b Create repo button: show the steps, then Create now <!-- merged: 9dccb54 -->
   - [x] 7c Manager decisions: closed outcomes, ledger, dry-run default <!-- merged: 0dde61e -->
-  - [ ] 7d Manager worker wiring: trigger, drain, Workers card, plugins.json, 15 minute dry run <!-- needs: owner decision on its home -->
+  - [x] 7d Manager worker wiring: trigger, drain, Workers card, plugins.json, 15 minute dry run <!-- manual: true needs: owner decision on its home superseded: superseded by owner decision 2026-11-18 -->
 - [x] FF-8 Sub-pieces visible in the UI <!-- deps: FF-3 manual: true merged: 5aee339 -->
   - [x] 8a Sub-pieces of checklist items: parsing, route fields and the real sub-pieces <!-- merged: f203f53 -->
   - [x] 8b Sub-pieces drawn under each step with progress, merge commit and what is needed <!-- merged: 5aee339 -->
