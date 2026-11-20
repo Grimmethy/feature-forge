@@ -88,6 +88,21 @@ def project_for(repo_name: str) -> dict:
     raise NotRegisteredError(repo_name)
 
 
+def all_projects() -> list[dict]:
+    """Every project in the registry, as stored (keys label, repoRoot, pipelineDir, domainsPath).
+    The list-all counterpart of project_for; status._find_in_projects consumes it.
+    An empty registry gives []. A missing, unreadable or non-list registry raises FilingError, as project_for does.
+    Entries are returned as stored, with no pipeline check, so one half-registered project cannot hide the rest."""
+    path = projects_path()
+    try:
+        projects = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise FilingError(f"cannot read the project registry {path}: {e}")
+    if not isinstance(projects, list):
+        raise FilingError(f"cannot read the project registry {path}: expected a list of projects")
+    return [dict(p) for p in projects if isinstance(p, dict)]
+
+
 def _item(slug: str, item_id: str, root: Path | None):
     entries = checklist.parse(store.read_file(slug, "checklist.md", root))
     for it in checklist.items(entries):
