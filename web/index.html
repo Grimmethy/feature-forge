@@ -316,7 +316,7 @@ function gToast(){toast('End the current grill session first (Save to interview,
 function openGrill(){
   if(!cur){toast('Open a feature first');return}
   if(G&&G.slug!==cur)gReset();
-  $('grill').style.display='flex';$('gtitle').textContent=`Grill: ${cur}${gNode!=='feature'?' / '+gNode:''};$('grill').setAttribute('data-state','starting');
+  $('grill').style.display='flex';$('gtitle').textContent=`Grill: ${cur}${gNode!=='feature'?' / '+gNode:''}`;$('grill').setAttribute('data-state','starting');
   if(!G&&!$('gt').children.length)gadd('sys','Starts an interview about this feature. The model can read the repos but cannot change anything. Nothing is saved until you press "Save to interview".')}
 async function gstream(url,body){
   $('grill').setAttribute('data-state','busy');
