@@ -101,7 +101,11 @@ class SyncTests(Base):
         self.assertEqual(status.sync(self.slug, self.root), {"ticked": [], "states": {}, "ticked_by_reason": {}})
         store.write_file(self.slug, "checklist.md", CHECKLIST, self.root)
         store.write_file(self.slug, "request.md", "# Thing\n\nno repo", self.root)
-        self.assertEqual(status.sync(self.slug, self.root), {"ticked": [], "states": {}, "ticked_by_reason": {}})
+        from unittest import mock
+        with mock.patch.object(status.filing, "all_projects", return_value=[]):      # no project holds any task
+            r = status.sync(self.slug, self.root)
+        self.assertEqual((r["ticked"], r["ticked_by_reason"]), ([], {}))
+        self.assertTrue(all(s["state"] == "missing" for s in r["states"].values()))
         self.assertFalse(self.items()["FF-2"]["ticked"])
 
     def test_a_history_copy_is_kept_when_it_writes(self):

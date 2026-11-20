@@ -60,9 +60,8 @@ class SyncRouteTests(unittest.TestCase):
     def test_unknown_feature_is_404_and_an_unregistered_repo_is_400(self):
         self.assertEqual(self.client.post("/api/features/nope/sync").status_code, 404)
         store.write_file(self.slug, "request.md", "# Thing\n\nrepo: gamma", self.root)
-        # 409, not 400: server/app.py maps filing.NotRegisteredError to 409 with code "not-registered" and the create-repo steps,
-        # so the UI can offer to create the repo. The route is deliberate; the test's expected code was stale.
-        self.assertEqual(self.client.post(f"/api/features/{self.slug}/sync").status_code, 409)
+        # sync now resolves tasks across every registered project, so an unregistered repo line no longer fails the route.
+        self.assertEqual(self.client.post(f"/api/features/{self.slug}/sync").status_code, 200)
 
 
 if __name__ == "__main__":
