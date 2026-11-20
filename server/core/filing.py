@@ -18,7 +18,9 @@ import time
 import urllib.request
 from pathlib import Path
 
-from . import checklist, grill, parallel_files, piece_repo_lint, store
+from . import checklist, grill, parallel_files, store
+from .piece_repo_lint import lint_piece_repo_mismatch
+from .piece_routing import route_pieces
 
 AM_CORE = Path(os.environ.get("FEATUREFORGE_AM_CORE", "/media/model-cache/github/agent-manager"))
 AM_URL = os.environ.get("FEATUREFORGE_AM_URL", "http://localhost:7420")
@@ -238,12 +240,45 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
         todo = [target]
     if not todo:
         raise FilingError(f"{item_id} has no unfiled pieces")
-    warnings = sorted({w for p in todo for w in lint(p["title"] + "\n" + p["body"])})
-    if warnings and not accept_lint:
-        raise FilingError("polling language in this item (" + ", ".join(warnings) + "): reword it to use a trigger, or accept the warning")
-    # Repo-line lint: a warning only. It is added after the polling-language gate above, so it never changes the File decision.
-    warnings += piece_repo_lint.lint_piece_repo_mismatch(
-        todo, project.get("label") or Path(project["repoRoot"]).name, lambda piece, feature_repo: feature_repo)
+    # Lint every piece before any write. A piece that fails is marked blocked and skipped;
+    # pieces that pass continue unchanged.
+    blocked: set[str] = set()
+    warnings: list[str] = []
+    for p in todo:
+        piece_warnings = lint(p["title"] + "\n" + p["body"])
+        if piece_warnings and not accept_lint:
+            blocked.add(p["id"])
+            warnings.extend(f"{p['id']}: {w}" for w in piece_warnings)
+    repo_line_warnings = lint_piece_repo_mismatch(
+        [p for p in todo if p["id"] not in blocked],
+        project.get("label") or Path(project["repoRoot"]).name,
+        lambda piece, feature_repo: feature_repo,
+    )
+    if repo_line_warnings:
+        warnings.extend(repo_line_warnings)
+    if blocked and not accept_lint:
+        raise FilingError(
+            "polling language in piece(s) " + ", ".join(sorted(blocked)) + ": "
+            + " or ".join(w for w in warnings if any(w.startswith(b + ": " for b in blocked)))
+            + "; reword to use a trigger, or accept the warning"
+        )
+    todo = [p for p in todo if p["id"] not in blocked]
+    # Route each piece to its target repo. Pieces with no override inherit
+    # the feature repo; pieces whose target differs from the feature repo get
+    # that repo's header line prepended into the queued text.
+    feature_repo = grill.target_repo(slug, root)["name"]
+
+    def _repo_known(name: str) -> bool:
+        try:
+            project_for(name)
+            return True
+        except NotRegisteredError:
+            return False
+
+    routed = route_pieces(todo, feature_repo, _repo_known)
+    for r in routed:
+        if r["status"] == "blocked":
+            raise FilingError(r["message"])
     premium = it["meta"].get("premium") == "true"
     out = {"id": item_id, "pieces": [], "premium": premium, "warnings": warnings}
     _deps_map: dict[str, set[str]] = {}
@@ -286,8 +321,18 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
                 continue
             for shared in sorted(p_files & prev_files):
                 warnings.append(f"{p['id']} and {prev['id']} both name {shared}; they can run in parallel and may conflict")
+        _target = next(r for r in routed if r["piece"]["id"] == p["id"])
+        text = record_text(slug, item_id, root, p["id"])
+        if _target["targetRepo"] != feature_repo:
+            text = re.sub(
+                r"^Repo: " + re.escape(feature_repo) + r"\.$",
+                f"Repo: {_target['targetRepo']}.",
+                text,
+                count=1,
+                flags=re.MULTILINE,
+            )
         try:
-            task = _queue_task(project, f"{item_id}/{p['id']} {p['title']}", record_text(slug, item_id, root, p["id"]), f"feature-forge:{slug}/{item_id}/{p['id']}", deps)
+            task = _queue_task(project, f"{item_id}/{p['id']} {p['title']}", text, f"feature-forge:{slug}/{item_id}/{p['id']}", deps)
         except FilingError as e:
             raise FilingError(f"{e} (filed so far: {', '.join(x['task'] for x in out['pieces']) or 'nothing'})")
         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -295,7 +340,7 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
         it["meta"].setdefault("filed", stamp)                   # the first piece filed locks the item
         it["dirty"] = True
         _write_entries(slug, entries, root)                     # each task exists now: record it before anything else can fail
-        entry = {"piece": p["id"], "task": task}
+        entry = {"piece": p["id"], "status": "filed", "repo": _target["targetRepo"], "task": task}
         if premium:
             try:
                 _post(f"/api/task-anywhere/{task}/premium-priority?project={project['repoRoot']}", {"enabled": True, "by": "operator-ui"})
@@ -308,7 +353,8 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
 
 def file_item(slug: str, item_id: str, accept_lint: bool = False, root: Path | None = None, piece: str | None = None) -> dict:
     """File an item as Agent Manager tasks. An item without pieces is one task; an item with pieces files each unfiled piece as its own task,
-    in order, each waiting for the one before (or just one piece when `piece` names it). Returns {id, task, premium, warnings} (+ pieces)."""
+    in order, each waiting for the one before (or just one piece when `piece` names it). Returns {id, task, premium, warnings} plus a `pieces`
+    list with one entry per piece, each holding status (filed/blocked/failed) and target repo."""
     entries, it = _item(slug, item_id, root)
     if it["ticked"]:
         raise FilingError(f"{item_id} is already done")
