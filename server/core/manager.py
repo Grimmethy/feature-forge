@@ -247,7 +247,13 @@ def main(argv=None) -> int:
     g.add_argument("--watch-paths", action="store_true")
     g.add_argument("--next-due", action="store_true")
     ap.add_argument("root", nargs="?")
-    a = ap.parse_args(argv)
+    a, unknown = ap.parse_known_args(argv)
+    if unknown:
+        print(
+            f"error: unrecognized arguments: {' '.join(unknown)}",
+            file=sys.stderr,
+        )
+        return 2
     root = Path(a.root) if a.root else None
     try:
         if a.watch_paths:
