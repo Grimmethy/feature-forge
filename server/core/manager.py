@@ -247,7 +247,15 @@ def main(argv=None) -> int:
     g.add_argument("--watch-paths", action="store_true")
     g.add_argument("--next-due", action="store_true")
     ap.add_argument("root", nargs="?")
-    a, unknown = ap.parse_known_args(argv)
+    try:
+        a, unknown = ap.parse_known_args(argv)
+    except SystemExit as e:
+        # argparse prints its own error message (e.g. mutual-exclusion) to stderr;
+        # parse_known_args swallows that output, so re-emit it explicitly.
+        msg = getattr(e, "msg", None)
+        if msg is not None:
+            print(f"error: {msg}", file=sys.stderr)
+        raise
     if unknown:
         print(
             f"error: unrecognized arguments: {' '.join(unknown)}",
