@@ -316,7 +316,7 @@ function gToast(){toast('End the current grill session first (Save to interview,
 function openGrill(){
   if(!cur){toast('Open a feature first');return}
   if(G&&G.slug!==cur)gReset();
-  $('grill').style.display='flex';$('gtitle').textContent=`Grill: ${cur}${gNode!=='feature'?' / '+gNode:''};$('grill').setAttribute('data-state','starting');
+  $('grill').style.display='flex';$('gtitle').textContent=`Grill: ${cur}${gNode!=='feature'?' / '+gNode:''}`;$('grill').setAttribute('data-state','starting');
   if(!G&&!$('gt').children.length)gadd('sys','Starts an interview about this feature. The model can read the repos but cannot change anything. Nothing is saved until you press "Save to interview".')}
 async function gstream(url,body){
   $('grill').setAttribute('data-state','busy');
@@ -350,7 +350,7 @@ $('gsave').onclick=async()=>{if(!G)return;
   catch(e){gadd('sys','Save failed: '+e.message)}};
 $('gend').onclick=async()=>{if(!G)return;
   if(gUnsaved&&!gEnding){gEnding=true;gadd('sys','Not saved yet. Press End again to discard, or Save to interview first.');return}
-  $('grill').setAttribute('data-state','ended');await post(`/api/grill/${G.slug}/${G.sid}/end`,{}).catch(()=>{});gReset();gNode='feature';gadd('sys','Session ended.')};
+  $('grill').setAttribute('data-state','ended');await post(`/api/grill/${G.slug}/${G.sid}/end`,{}).catch(()=>{});gReset();gNode='feature';gadd('sys','Session ended.');};
 /* ---- proposal review: the model proposes checklist changes, the owner ticks which to apply ---- */
 let PROP=null;
 function showProp(){
