@@ -119,5 +119,106 @@ class AllTagsTests(TmpRootCase):
         self.assertEqual([r["tag"] for r in store.all_tags(self.root)], ["a", "a/c", "b"])
 
 
+class SetTagsTests(TmpRootCase):
+    def _read(self, slug):
+        return (self.root / slug / "request.md").read_text(encoding="utf-8")
+
+    def _make_with_request(self, slug, text):
+        d = self.root / slug
+        d.mkdir(parents=True)
+        d.joinpath("plan.md").write_text(f"# Plan: {slug}\n\n_Not started._\n")
+        d.joinpath("interview.md").write_text(f"# Interview: {slug}\n\n_Not started._\n")
+        d.joinpath("checklist.md").write_text(f"# Checklist: {slug}\n\n")
+        d.joinpath("request.md").write_text(text, encoding="utf-8")
+        return slug
+
+    def test_set_tags_adds_after_repo_line(self):
+        slug = self._make_with_request("with-repo", "# My Feature\n\nrepo: some-repo\n\nbuild it\n")
+        store.set_tags(slug, ["alpha", "beta"], root=self.root)
+        text = self._read(slug)
+        lines = text.splitlines()
+        repo_idx = next(i for i, l in enumerate(lines) if l.startswith("repo:"))
+        tags_idx = next(i for i, l in enumerate(lines) if l.startswith("tags:"))
+        self.assertEqual(tags_idx, repo_idx + 1)
+        self.assertEqual(lines[tags_idx], "tags: alpha, beta")
+
+    def test_set_tags_adds_after_heading_when_no_repo(self):
+        slug = self._make_with_request("no-repo", "# My Feature\n\nbuild it\n")
+        store.set_tags(slug, ["alpha", "beta"], root=self.root)
+        text = self._read(slug)
+        lines = text.splitlines()
+        heading_idx = next(i for i, l in enumerate(lines) if l.startswith("# "))
+        tags_idx = next(i for i, l in enumerate(lines) if l.startswith("tags:"))
+        self.assertEqual(tags_idx, heading_idx + 1)
+        self.assertEqual(lines[tags_idx], "tags: alpha, beta")
+
+    def test_set_tags_replaces_in_place(self):
+        slug = self._make_with_request("replace", "# My Feature\n\nrepo: some-repo\ntags: old, one\ntodo\n")
+        store.set_tags(slug, ["new"], root=self.root)
+        text = self._read(slug)
+        self.assertIn("tags: new\n", text)
+        self.assertNotIn("tags: old, one", text)
+
+    def test_set_tags_empty_list_removes_line(self):
+        slug = self._make_with_request("remove", "# My Feature\n\nrepo: some-repo\ntags: a, b\ntodo\n")
+        store.set_tags(slug, [], root=self.root)
+        text = self._read(slug)
+        self.assertNotIn("tags:", text)
+        self.assertIn("todo\n", text)
+
+    def test_set_tags_preserves_other_lines(self):
+        slug = self._make_with_request("preserve", "# My Feature\n\nrepo: some-repo\ntags: a, b\nline one\nline two\n")
+        store.set_tags(slug, ["x", "y"], root=self.root)
+        text = self._read(slug)
+        self.assertIn("line one\n", text)
+        self.assertIn("line two\n", text)
+        self.assertIn("repo: some-repo\n", text)
+
+    def test_set_tags_invalid_tag_raises_valueerror(self):
+        slug = self._make_with_request("invalid", "# My Feature\n\nbuild it\n")
+        with self.assertRaises(ValueError):
+            store.set_tags(slug, ["Bad Tag!"], root=self.root)
+        with self.assertRaises(ValueError):
+            store.set_tags(slug, ["a.b"], root=self.root)
+
+    def test_set_tags_invalid_tag_file_unchanged(self):
+        slug = self._make_with_request("unchanged", "# My Feature\n\nbuild it\n")
+        original = self._read(slug)
+        with self.assertRaises(ValueError):
+            store.set_tags(slug, ["Bad Tag!"], root=self.root)
+        self.assertEqual(self._read(slug), original)
+
+    def test_set_tags_values_read_back(self):
+        slug = self._make_with_request("roundtrip", "# My Feature\n\nrepo: r\ntags: a, b, c\n")
+        store.set_tags(slug, ["x", "y"], root=self.root)
+        text = self._read(slug)
+        self.assertEqual(store._parse_tags(text), ["x", "y"])
+
+
+class CreateFeatureTagsTests(TmpRootCase):
+    def _read(self, slug):
+        return (self.root / slug / "request.md").read_text(encoding="utf-8")
+
+    def test_create_feature_with_tags_writes_line_after_heading(self):
+        slug = store.create_feature("Tagged", "build it", self.root, tags=["alpha", "beta"])
+        text = self._read(slug)
+        lines = text.splitlines()
+        heading_idx = next(i for i, l in enumerate(lines) if l.startswith("# "))
+        tags_idx = next(i for i, l in enumerate(lines) if l.startswith("tags:"))
+        self.assertEqual(tags_idx, heading_idx + 1)
+        self.assertEqual(lines[tags_idx], "tags: alpha, beta")
+
+    def test_create_feature_without_tags_same_text_as_before(self):
+        slug = store.create_feature("Plain", "build it", self.root)
+        text = self._read(slug)
+        self.assertNotIn("tags:", text)
+        self.assertTrue(text.startswith("# Plain\n\nbuild it\n"))
+
+    def test_create_feature_tags_read_back(self):
+        slug = store.create_feature("Roundtrip", "build it", self.root, tags=["p", "q/r"])
+        text = self._read(slug)
+        self.assertEqual(store._parse_tags(text), ["p", "q/r"])
+
+
 if __name__ == "__main__":
     unittest.main()
