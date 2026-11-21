@@ -11,8 +11,10 @@ Done (all ticked). Progress is (ticked, total).
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -69,10 +71,20 @@ def write_file(slug: str, rel: str, text: str, root: Path | None = None) -> None
         hist.mkdir(exist_ok=True)
         shutil.copy2(p, hist / f"{p.name}.{time.strftime('%Y%m%dT%H%M%S')}")
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".{p.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
-def create_feature(title: str, request_text: str, root: Path | None = None) -> str:
+def create_feature(title: str, request_text: str, root: Path | None = None, tags=None) -> str:
     title = (title or "").strip()
     if not title:
         raise StoreError("title is required")
@@ -82,7 +94,13 @@ def create_feature(title: str, request_text: str, root: Path | None = None) -> s
         slug = f"{slugify(title)}-{n}"
     d = base / slug
     d.mkdir(parents=True)
-    d.joinpath("request.md").write_text(f"# {title}\n\n{(request_text or '').strip()}\n", encoding="utf-8")
+    body = (request_text or "").strip()
+    tags_line = ""
+    if tags:
+        clean = normalise_tags(tags)
+        if clean:
+            tags_line = "tags: " + ", ".join(clean) + "\n"
+    d.joinpath("request.md").write_text(f"# {title}\n{tags_line}\n{body}\n", encoding="utf-8")
     d.joinpath("plan.md").write_text(f"# Plan: {title}\n\n_Not started._\n", encoding="utf-8")
     d.joinpath("interview.md").write_text(f"# Interview: {title}\n\n_Not started._\n", encoding="utf-8")
     d.joinpath("checklist.md").write_text(f"# Checklist: {title}\n\n", encoding="utf-8")
@@ -169,6 +187,69 @@ def _parse_tags(text: str) -> list[str]:
                     tags.append(t)
             return tags
     return []
+
+
+_TAG_ALLOWED_RE = re.compile(r"^[a-z0-9/_-]+$")
+
+
+def normalise_tags(tags):
+    """Lowercase, trim, drop empty, dedupe (first-seen order kept).
+
+    Raise ValueError naming every tag whose characters fall outside
+    [a-z 0-9 - / _].  Empty-after-trim entries are silently dropped,
+    matching _parse_tags behaviour.  Preserves first-seen order."""
+    cleaned, bad = [], []
+    for raw in tags or []:
+        t = str(raw).strip().lower()
+        if not t:
+            continue
+        if t in cleaned:
+            continue
+        if _TAG_ALLOWED_RE.match(t):
+            cleaned.append(t)
+        else:
+            bad.append(t)
+    if bad:
+        raise ValueError(f"invalid tag(s): {', '.join(sorted(bad))}")
+    return cleaned
+
+
+def set_tags(slug, tags, root=None):
+    """Rewrite only the 'tags:' line of request.md.
+
+    Validates and normalises *tags* before any I/O. Replaces an
+    existing 'tags:' line in place (removing it when the list is
+    empty), or inserts one after 'repo:' if present, otherwise after
+    the '# ' heading. Writes through write_file so .history/ is kept."""
+    clean = normalise_tags(tags)
+    fdir = feature_dir(slug, root)
+    path = fdir / "request.md"
+    raw = path.read_text(encoding="utf-8")
+    lines = raw.splitlines(keepends=True)
+    idx = next((i for i, l in enumerate(lines) if l.startswith("tags:")), None)
+    if idx is not None:
+        if clean:
+            eol = "\n" if lines[idx].endswith("\n") else ""
+            lines[idx] = "tags: " + ", ".join(clean) + eol
+        else:
+            del lines[idx]
+    elif clean:
+        pos = next((i for i, l in enumerate(lines) if l.startswith("repo:")), None)
+        if pos is None:
+            pos = next((i for i, l in enumerate(lines) if l.startswith("# ")), None)
+        if pos is None:
+            raise StoreError(
+                f"request.md has no 'repo:' or '# ' heading to anchor tags"
+            )
+        if not lines[pos].endswith("\n"):
+            lines[pos] += "\n"
+        lines.insert(pos + 1, "tags: " + ", ".join(clean) + "\n")
+    else:
+        return
+    new_text = "".join(lines)
+    if new_text == raw:
+        return
+    write_file(slug, "request.md", new_text, root=root)
 
 
 def _request_tags(slug: str, root: Path | None) -> list[str]:
