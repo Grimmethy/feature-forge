@@ -77,7 +77,7 @@ form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px s
   <div id="list"></div>
 </div>
 <div id="main">
-  <div id="top"><span class="path" id="path">Pick a feature, or create one.</span>
+  <div id="top"><span class="path" id="path">Pick a feature, or create one.</span><span id="file-msg" class="warn" style="display:none;margin-left:8px;font-size:13px"></span>
     <button id="bRepo" style="display:none" title="Which repo is this feature built in?">Choose repo</button><button id="bGrill" class="primary" style="display:none" title="Interview me about this feature">&#128293; Grill</button><button id="bGraph" style="display:none" title="The dependency graph of this feature">Graph</button><button id="bView" class="on" style="display:none">View</button><button id="bEdit" style="display:none">Edit</button><button id="bSave" class="primary" style="display:none">Save</button></div>
   <div id="body"><div id="tree"></div><div id="view"></div><textarea id="edit" spellcheck="false"></textarea></div>
 </div>
@@ -97,7 +97,7 @@ const STATUSES=['Grilling','Planned','Filed','Building','Done'];
 let features=[],filter='All',cur=null,curPath=null,editing=false;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(m){const t=$('toast');t.textContent=m;t.classList.remove('show');void t.offsetWidth;t.classList.add('show')}
-async function api(url,opt){const r=await fetch(url,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
+async function api(url,opt){const r=await fetch(url,opt);const text=await r.text();let j;try{j=JSON.parse(text)}catch{j={}};if(!r.ok){const e=new Error(j.error||r.status);e.status=r.status;e.body=text;e.url=url;throw e};return j}
 const post=(url,body,method)=>api(url,{method:method||'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
 function renderFilters(){
@@ -207,9 +207,18 @@ document.addEventListener('click',async ev=>{
   const fb=ev.target.closest('[data-file]'),pb=ev.target.closest('[data-flag]');
   if(fb||pb){try{
     if(pb){await post(`/api/features/${cur}/checklist/${pb.dataset.id}/flag`,{flag:pb.dataset.flag,value:pb.dataset.val==='true'})}
-    else{const id=fb.dataset.file,row=(await api(`/api/features/${cur}/checklist`)).find(r=>r.id===id);
+    else{const id=fb.dataset.file,msg=$('file-msg');msg.textContent='';msg.style.display='none';
+      const row=(await api(`/api/features/${cur}/checklist`)).find(r=>r.id===id);
       if(row&&row.lint.length&&!lintArmed.has(id)){lintArmed.add(id);await openFile('checklist.md');return}
-      const r=await post(`/api/features/${cur}/checklist/${id}/file`,{acceptLint:lintArmed.has(id)});lintArmed.delete(id);
+      let r;try{r=await post(`/api/features/${cur}/checklist/${id}/file`,{acceptLint:lintArmed.has(id)})}catch(e){
+        msg.style.display='';
+        if(e.status===409){msg.textContent='Already registered. Use a different email.'}
+        else if(e.status&&e.body){try{const j=JSON.parse(e.body);if(j&&typeof j.error==='string'){msg.textContent=j.code?`${j.error} (${j.code})`:j.error}}catch{msg.textContent=`HTTP ${e.status}`}}
+        else if(e.status){msg.textContent=`HTTP ${e.status}`}
+        else{msg.textContent='Request failed'}
+        return
+      }
+      lintArmed.delete(id);
       const made=(r.pieces&&r.pieces.length)?r.pieces.map(x=>x.piece+' '+x.task).join(', '):r.task;const pe=r.premiumError||(r.pieces||[]).map(x=>x.premiumError).find(Boolean);
       toast(`Filed ${id} as ${made}${pe?' (premium not set: '+pe+')':''}`);await loadLibrary()}
     await openFile('checklist.md')}catch(e){toast(e.message)}return}
