@@ -72,7 +72,7 @@ def write_file(slug: str, rel: str, text: str, root: Path | None = None) -> None
     p.write_text(text, encoding="utf-8")
 
 
-def create_feature(title: str, request_text: str, root: Path | None = None) -> str:
+def create_feature(title: str, request_text: str, root: Path | None = None, tags=None) -> str:
     title = (title or "").strip()
     if not title:
         raise StoreError("title is required")
@@ -82,7 +82,13 @@ def create_feature(title: str, request_text: str, root: Path | None = None) -> s
         slug = f"{slugify(title)}-{n}"
     d = base / slug
     d.mkdir(parents=True)
-    d.joinpath("request.md").write_text(f"# {title}\n\n{(request_text or '').strip()}\n", encoding="utf-8")
+    body = (request_text or "").strip()
+    tags_line = ""
+    if tags:
+        clean = normalise_tags(tags)
+        if clean:
+            tags_line = "tags: " + ", ".join(clean) + "\n"
+    d.joinpath("request.md").write_text(f"# {title}\n{tags_line}\n{body}\n", encoding="utf-8")
     d.joinpath("plan.md").write_text(f"# Plan: {title}\n\n_Not started._\n", encoding="utf-8")
     d.joinpath("interview.md").write_text(f"# Interview: {title}\n\n_Not started._\n", encoding="utf-8")
     d.joinpath("checklist.md").write_text(f"# Checklist: {title}\n\n", encoding="utf-8")
