@@ -41,6 +41,17 @@ def find_task(pipeline_dir: str, task_id: str) -> tuple[str | None, dict | None]
     return None, None
 
 
+def _find_in_projects(projects: list[dict], preferred: str | None, task_id: str):
+    """(state, record, project) for the first project holding the task, trying the one labelled `preferred` first; else (None, None, None)."""
+    ordered = [p for p in projects if preferred and p.get("label") == preferred]
+    ordered += [p for p in projects if p not in ordered]
+    for project in ordered:
+        state, rec = find_task(project["pipelineDir"], task_id)
+        if state is not None:
+            return state, rec, project
+    return None, None, None
+
+
 def _when(text: str | None):
     try:
         t = datetime.fromisoformat(str(text).replace("Z", "+00:00"))
@@ -121,19 +132,21 @@ def sync(slug: str, root: Path | None = None) -> dict:
     out = {"ticked": [], "states": {}, "ticked_by_reason": {}}
     if not units:
         return out
-    repo = grill.target_repo(slug, root)["name"]
-    if not repo:
-        return out
-    pipeline = filing.project_for(repo)["pipelineDir"]
+    target = grill.target_repo(slug, root)
+    preferred = (target.get("name") if isinstance(target, dict) else None) or None
+    try:
+        projects = filing.all_projects()
+    except filing.FilingError:                          # no readable project registry: nothing can be found, so tasks read as missing
+        projects = []
     rows = []
     finished: dict[str, list[str]] = {}                 # item id -> merge times of the pieces merged in this run
     for key, it, piece, meta in units:
-        state, rec = find_task(pipeline, meta["task"])
+        state, rec, project = _find_in_projects(projects, preferred, meta["task"])
         if state is None:
             out["states"][key] = {"state": "missing", "status": "", "reason": "missing"}
             continue
         status = str((rec or {}).get("status", ""))
-        label, reason, stamp, category = _classify(state, rec or {}, pipeline)
+        label, reason, stamp, category = _classify(state, rec or {}, project["pipelineDir"])
         out["states"][key] = {"state": label, "status": status, "reason": reason}
         if (piece["ticked"] if piece else it["ticked"]) or stamp is None:
             continue
@@ -156,7 +169,7 @@ def sync(slug: str, root: Path | None = None) -> dict:
         out["ticked"].append(key)
         out["ticked_by_reason"][category] = out["ticked_by_reason"].get(category, 0) + 1
         if category == "merged":
-            rows.append({"slug": slug, "item": key, "task": meta["task"], "repo": repo, "filed": str(ft) if ft else None,
+            rows.append({"slug": slug, "item": key, "task": meta["task"], "repo": project.get("label"), "filed": str(ft) if ft else None,
                          "merged": str(rec.get("mergedAt")), "minutes": minutes,
                          "premium": it["meta"].get("premium") == "true",
                          "cloud": it["meta"].get("cloud") == "true"})
