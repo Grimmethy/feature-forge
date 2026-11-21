@@ -91,6 +91,18 @@ class GraphTests(Base):
         self.assertIn("FF-5 A very long title that has …", shown)       # cut on screen
         self.assertIn("FF-5 A very long title that has to be cut somewhere sensible", s)     # whole in the hover tooltip
 
+    def test_svg_metacharacters_in_labels_are_escaped(self):
+        """Ensure user-controlled data in labels is escaped to prevent SVG injection."""
+        s = self.svg()
+        # Raw metacharacters should not appear in content positions
+        self.assertNotIn("<script>", s)
+        self.assertNotIn("onerror=", s)
+        self.assertNotIn("onclick=", s)
+        # Escaped forms should be present (the test feature has "<core>" in title)
+        self.assertIn("&lt;", s)
+        self.assertIn("&gt;", s)
+        self.assertIn("&amp;", s)
+
     def test_an_empty_checklist_is_a_message_not_a_crash(self):
         store.write_file(self.two, "checklist.md", "# Checklist: Two\n", self.root)
         self.assertIn("No checklist items yet", self.svg(self.two))
