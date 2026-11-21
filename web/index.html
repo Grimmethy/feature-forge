@@ -47,6 +47,7 @@ form.nf textarea{min-height:180px}
 .gm.me{background:rgba(217,164,65,.12)}.gm.sys{color:var(--muted);font-size:12px;border:0;padding:2px 0}
 #gin{border-top:1px solid var(--line);padding:8px;display:none;flex-direction:column;gap:6px}
 #gtext{width:100%;min-height:72px;resize:vertical;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit}
+#gwhy{color:var(--accent);font-size:12px;min-height:16px}
 #gin .row2{display:flex;gap:6px;flex-wrap:wrap}
 .repo-opt{padding:6px 0;border-bottom:1px solid var(--line)}.repo-opt small{color:var(--muted);display:block}
 #prop{border-top:1px solid var(--line);padding:8px;display:none;max-height:40%;overflow:auto;font-size:13px}
@@ -86,6 +87,7 @@ form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px s
   <div id="gt"></div>
   <div style="padding:8px"><button id="gstart" class="primary">Start the interview</button></div>
   <div id="gin"><textarea id="gtext" placeholder="Your answers (Ctrl+Enter sends)"></textarea>
+    <div id="gwhy" style="color:var(--accent);font-size:12px;min-height:16px"></div>
     <div class="row2"><button id="gsend" class="primary">Send</button><button id="gsave" title="Append this conversation to interview.md">Save to interview</button><button id="grev" title="Read the newest checklist proposal in this conversation">Review proposal</button><button id="gend" title="End the session (press twice if it is unsaved)">End</button></div></div>
   <div id="prop" data-count="0"></div>
 </div>
@@ -306,9 +308,9 @@ function repoCreateBox(name){
 $('bRepo').onclick=()=>repoChooser().catch(e=>toast(e.message));
 
 /* ---- grill panel ---- */
-let G=null,gUnsaved=false,gEnding=false,gNode='feature';
+let G=null,gUnsaved=false,gEnding=false,gNode='feature',gBusy=false,gQueued='';
 function gadd(cls,text){const d=document.createElement('div');d.className='gm '+cls;d.textContent=text;$('gt').appendChild(d);$('gt').scrollTop=1e9;return d}
-function gReset(){$('prop').style.display='none';$('prop').innerHTML='';$('prop').setAttribute('data-count','0');G=null;gUnsaved=false;gEnding=false;$('gt').innerHTML='';$('gin').style.display='none';$('gstart').parentElement.style.display='';$('grill').setAttribute('data-state','idle')}
+function gReset(){$('prop').style.display='none';$('prop').innerHTML='';$('prop').setAttribute('data-count','0');G=null;gUnsaved=false;gEnding=false;gBusy=false;gQueued='';$('gwhy').textContent='';$('gt').innerHTML='';$('gin').style.display='none';$('gstart').parentElement.style.display='';$('grill').setAttribute('data-state','idle')}
 function itemGrill(id){
   if(!cur)return;if(G&&(G.slug!==cur||G.node!==id)){gToast();return}
   gNode=id;openGrill()}
@@ -318,9 +320,22 @@ function openGrill(){
   if(G&&G.slug!==cur)gReset();
   $('grill').style.display='flex';$('gtitle').textContent=`Grill: ${cur}${gNode!=='feature'?' / '+gNode:''}`;$('grill').setAttribute('data-state','starting');
   if(!G&&!$('gt').children.length)gadd('sys','Starts an interview about this feature. The model can read the repos but cannot change anything. Nothing is saved until you press "Save to interview".')}
+function gSendNow(){
+  const t=$('gtext').value.trim();
+  if(!t){$('gwhy').textContent='Type a message first.';return}
+  if(!G){$('gwhy').textContent='No active session.';return}
+  if(gBusy){gQueued=t;$('gtext').value='';$('gwhy').textContent='Queued — will send when this round ends.';return}
+  gBusy=true;$('gwhy').textContent='';
+  gadd('me',t);
+  gstream(`/api/grill/${G.slug}/${G.sid}/message`,{message:t}).then(ok=>{
+    gBusy=false;
+    if(ok){$('gtext').value='';if(gQueued){const q=gQueued;gQueued='';gSendNow()}else{$('gwhy').textContent=''}}
+    else{$('gwhy').textContent='Round ended with error.'}
+  });
+}
 async function gstream(url,body){
   $('grill').setAttribute('data-state','busy');
-  const bub=gadd('','');$('gsend').disabled=true;
+  const bub=gadd('','');
   try{
     const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
     if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||r.status)}
@@ -332,8 +347,8 @@ async function gstream(url,body){
           else if(ev.type==='error'&&ev.code==='interviewer_killed')gKilled(ev);
           else if(ev.type==='error')gadd('sys','Error: '+ev.error)}}}
     if(!bub.textContent)bub.textContent='(no reply)';gUnsaved=true;
-  }catch(e){bub.className='gm sys';bub.textContent='Error: '+e.message;$('gsend').disabled=false;return false}
-  $('gsend').disabled=false;$('grill').setAttribute('data-state','ready');return true}
+  }catch(e){bub.className='gm sys';bub.textContent='Error: '+e.message;return false}
+  $('grill').setAttribute('data-state','ready');return true}
 function gKilled(ev){const d=gadd('sys','The interviewer was stopped (killed by the system, usually memory pressure). Nothing was lost.');const b=document.createElement('button');b.textContent='Retry';b.onclick=()=>gRetry(ev.session_id||(G&&G.sid),b);d.appendChild(b)}
 async function gRetry(sid,b){b.disabled=true;try{const r=await post(`/grill/sessions/${sid}/retry`,{});b.remove();gadd('sys',`Retried from round ${r.round}. Send your answer to continue.`)}catch(e){b.disabled=false;gadd('sys','Retry failed: '+e.message)}}
 $('bGrill').onclick=()=>{if(!G)gNode='feature';openGrill()};
@@ -343,8 +358,8 @@ $('gstart').onclick=async()=>{
     G={sid:m.id,slug:cur,node:gNode};$('gstart').parentElement.style.display='none';$('gin').style.display='flex';
     gadd('sys','Session started. Waiting for the first round...');await gstream(`/api/grill/${G.slug}/${G.sid}/begin`);
   }catch(e){gadd('sys','Could not start: '+e.message)}finally{$('gstart').disabled=false}};
-$('gsend').onclick=async()=>{const t=$('gtext').value.trim();if(!t||!G)return;gadd('me',t);if(await gstream(`/api/grill/${G.slug}/${G.sid}/message`,{message:t}))$('gtext').value=''};
-$('gtext').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter')$('gsend').click()});
+$('gsend').onclick=gSendNow;
+$('gtext').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();gSendNow()}});
 $('gsave').onclick=async()=>{if(!G)return;
   try{const r=await post(`/api/grill/${G.slug}/${G.sid}/save`,{});gUnsaved=false;gadd('sys',`Saved ${r.words} words to ${r.path}`);await loadLibrary();if(cur===G.slug)await openFeature(cur,'interview.md')}
   catch(e){gadd('sys','Save failed: '+e.message)}};
