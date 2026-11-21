@@ -425,6 +425,11 @@ class WatchAndDueTests(Base):
             with self.assertRaises(SystemExit) as ctx:
                 self.run_cli("--tick", "--watch-paths", str(self.root))
         self.assertEqual(ctx.exception.code, 2)
+        self.assertIn(
+            "not allowed with argument",
+            buf.getvalue(),
+            "argparse's mutual-exclusion error message should be printed to stderr",
+        )
 
 
 if __name__ == "__main__":
