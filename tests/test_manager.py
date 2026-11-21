@@ -400,6 +400,32 @@ class WatchAndDueTests(Base):
         self.assertEqual(out.count("\n"), 1)
         self.assertIn("boom", json.loads(out)["error"])
 
+    def test_main_unknown_flag_returns_nonzero(self):
+        code, _ = self.run_cli("--bogus-flag", str(self.root))
+        self.assertEqual(code, 2)
+
+    def test_main_unknown_flag_stderr_contains_flag_name(self):
+        import contextlib, io
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            self.run_cli("--unknown-xyz", str(self.root))
+        self.assertIn("--unknown-xyz", buf.getvalue())
+
+    def test_main_known_flag_still_works(self):
+        self.set_filed(10)
+        self.put("done", "t-pend", {"status": "done", "mergedAt": "2026-11-14T11:30:00+00:00"})
+        code, out = self.run_cli("--tick", str(self.root))
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["outcome"], "tick")
+
+    def test_mutual_exclusion_still_errors(self):
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            with self.assertRaises(SystemExit) as ctx:
+                self.run_cli("--tick", "--watch-paths", str(self.root))
+        self.assertEqual(ctx.exception.code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
