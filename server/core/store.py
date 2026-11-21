@@ -11,8 +11,10 @@ Done (all ticked). Progress is (ticked, total).
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -69,7 +71,17 @@ def write_file(slug: str, rel: str, text: str, root: Path | None = None) -> None
         hist.mkdir(exist_ok=True)
         shutil.copy2(p, hist / f"{p.name}.{time.strftime('%Y%m%dT%H%M%S')}")
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".{p.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def create_feature(title: str, request_text: str, root: Path | None = None, tags=None) -> str:
