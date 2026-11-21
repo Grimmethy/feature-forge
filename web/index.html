@@ -191,6 +191,21 @@ async function runSearch(){
   const hits=await api('/api/search?q='+encodeURIComponent(q));
   $('view').innerHTML=hits.length?hits.map(h=>`<div class="hit" data-s="${esc(h.slug)}" data-p="${esc(h.path)}"><b>${esc(h.slug)}/${esc(h.path)}</b><small>${esc(h.snippet)}</small></div>`).join(''):'<p><small>No matches.</small></p>';
 }
+function displayError(element, response) {
+  if (response && response.body) {
+    try {
+      const j = JSON.parse(response.body);
+      if (j && typeof j.error === 'string') {
+        element.textContent = j.code ? `${j.error} (${j.code})` : j.error;
+        return;
+      }
+    } catch {}
+  }
+  if (response && response.status) {
+    element.textContent = `HTTP ${response.status}`;
+  }
+}
+window.displayError = displayError;
 document.addEventListener('click',async ev=>{
   const gb=ev.target.closest('[data-grill]');if(gb){itemGrill(gb.dataset.grill);return}
   const db=ev.target.closest('[data-dismiss]');
@@ -213,8 +228,7 @@ document.addEventListener('click',async ev=>{
       let r;try{r=await post(`/api/features/${cur}/checklist/${id}/file`,{acceptLint:lintArmed.has(id)})}catch(e){
         msg.style.display='';
         if(e.status===409){msg.textContent='Already registered. Use a different email.'}
-        else if(e.status&&e.body){try{const j=JSON.parse(e.body);if(j&&typeof j.error==='string'){msg.textContent=j.code?`${j.error} (${j.code})`:j.error}}catch{msg.textContent=`HTTP ${e.status}`}}
-        else if(e.status){msg.textContent=`HTTP ${e.status}`}
+        else if(e.status){displayError(msg, e)}
         else{msg.textContent='Request failed'}
         return
       }
