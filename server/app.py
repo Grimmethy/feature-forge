@@ -118,8 +118,24 @@ def create_app(root: Path | None = None) -> Flask:
     @app.post("/api/features")
     def new_feature():
         body = request.get_json(silent=True) or {}
-        slug = store.create_feature(body.get("title", ""), body.get("request", body.get("request_text", "")), froot())
+        slug = store.create_feature(body.get("title", ""), body.get("request", body.get("request_text", "")), froot(),
+                                    tags=body.get("tags"))
         return jsonify({"slug": slug}), 201
+
+    @app.get("/api/tags")
+    def tags():
+        return jsonify(store.all_tags(froot()))
+
+    @app.put("/api/features/<slug>/tags")
+    def set_tags(slug):
+        body = request.get_json(silent=True) or {}
+        if "tags" not in body or not isinstance(body["tags"], list):
+            return jsonify({"error": "body must be JSON with a tags list"}), 400
+        try:
+            store.set_tags(slug, body["tags"], froot())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify(store.list_features(froot()))
 
     @app.get("/api/features/<slug>/tree")
     def tree(slug):
