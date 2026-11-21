@@ -393,12 +393,27 @@ class WatchAndDueTests(Base):
         code, out = self.run_cli("--next-due", str(self.root))
         self.assertEqual((code, out), (0, "null\n"))
 
-    def test_cli_tick_error_exit_0_with_error_key(self):
-        with mock.patch.object(manager, "tick", side_effect=RuntimeError("boom")):
+    def test_cli_tick_expected_error_exit_0_with_error_key(self):
+        # Domain errors (StoreError/FilingError/ChecklistError) are still
+        # swallowed and returned as JSON with exit 0 -- that is the contract
+        # these functions have for their callers.
+        with mock.patch.object(manager, "tick", side_effect=store.StoreError("boom")):
             code, out = self.run_cli("--tick", str(self.root))
         self.assertEqual(code, 0)
         self.assertEqual(out.count("\n"), 1)
         self.assertIn("boom", json.loads(out)["error"])
+
+    def test_cli_unexpected_error_propagates(self):
+        # Unexpected errors (RuntimeError, FileNotFoundError, PermissionError,
+        # ...) must NOT be swallowed: the caller needs to know the CLI crashed.
+        with mock.patch.object(manager, "tick", side_effect=RuntimeError("crash")):
+            with self.assertRaises(RuntimeError):
+                self.run_cli("--tick", str(self.root))
+
+    def test_cli_file_not_found_error_propagates(self):
+        with mock.patch.object(manager, "tick", side_effect=FileNotFoundError("nope")):
+            with self.assertRaises(FileNotFoundError):
+                self.run_cli("--tick", str(self.root))
 
     def test_main_unknown_flag_returns_nonzero(self):
         code, _ = self.run_cli("--bogus-flag", str(self.root))

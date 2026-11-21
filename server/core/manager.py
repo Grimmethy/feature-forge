@@ -270,7 +270,10 @@ def main(argv=None) -> int:
             out = next_due(root)
         else:
             out = tick(root)
-    except Exception as e:  # the CLI always exits 0; the error goes in the JSON
+    except (store.StoreError, filing.FilingError, checklist.ChecklistError) as e:
+        # Expected domain failures are reported as JSON with exit 0; unexpected
+        # errors (FileNotFoundError, PermissionError, RuntimeError, ...) propagate
+        # so callers can distinguish "worked but empty" from "crashed".
         out = {"error": str(e)}
     print(json.dumps(out))
     return 0
