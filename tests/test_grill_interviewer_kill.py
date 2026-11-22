@@ -78,7 +78,7 @@ class TestInterviewerKillEvent(unittest.TestCase):
                         mock_resp.__exit__ = MagicMock(return_value=False)
                         # Yield an error event with SIGKILL signal
                         error_event = 'data: {"type": "error", "error": "claude -p failed: exit=137 signal=SIGKILL"}\n\n'
-                        mock_resp.__iter__ = MagicMock(return_value=iter([error_event.encode("utf-8")]))
+                        mock_resp.__iter__.return_value = iter([error_event.encode("utf-8")])
                         return mock_resp
                     # For other calls, return a mock response
                     return MagicMock()
