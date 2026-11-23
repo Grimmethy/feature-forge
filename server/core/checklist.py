@@ -25,7 +25,7 @@ from pathlib import Path
 from . import store
 from .checklist_pieces import join_item_body, split_item_body, next_piece_label, _increment_label
 
-META_ORDER = ("task", "premium", "cloud", "deps", "after", "filed", "manual", "merged", "changed")
+META_ORDER = ("task", "premium", "cloud", "deps", "after", "filed", "manual", "merged", "changed", "pipeline")
 TITLE_CAP = 120
 BODY_CAP = 6000
 OPS = ("add", "change", "split", "remove", "supersede")
@@ -361,8 +361,12 @@ def _do_change(entries, op):
                 raise ChecklistError(f"cannot extend piece label beyond 'z' for item {it['id']}")
         it["body"] = it["body"] + new_lines
     # Drop guard: tagged pieces (task:/filed:/merged:) must survive byte-identical.
+    # Ignore the pipeline: stamp so stamping a piece doesn't trigger a false 'altered' error.
+    _strip_pipeline = re.compile(r"\s*pipeline:\s*\S+")
+    norm_before = [re.sub(_strip_pipeline, "", b).rstrip() for b in before_blocks]
     after_blocks = split_item_body("\n".join(it["body"]))[1]
-    assert_tagged_pieces_kept(it["id"], before_blocks, after_blocks)
+    norm_after = [re.sub(_strip_pipeline, "", a).rstrip() for a in after_blocks]
+    assert_tagged_pieces_kept(it["id"], norm_before, norm_after)
     if is_locked(it):
         it["meta"]["changed"] = time.strftime("%Y-%m-%d")
     it["dirty"] = True

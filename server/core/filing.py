@@ -168,6 +168,22 @@ def _write_entries(slug: str, entries, root):
     store.write_file(slug, "checklist.md", checklist.render(entries), root)
 
 
+PIPELINE_STAMP_RE = re.compile(r"^pipeline:\s*(.+)$", re.MULTILINE)
+
+
+def format_pipeline_stamp(label: str) -> str:
+    """A pipeline stamp line: 'pipeline: <label>'. Used to record which pipeline a task was queued to."""
+    return f"pipeline: {label}"
+
+
+def parse_pipeline_stamp(stamp: str) -> str | None:
+    """Extract the label from a pipeline stamp line, or None if it isn't one."""
+    if not stamp or not isinstance(stamp, str):
+        return None
+    m = PIPELINE_STAMP_RE.match(stamp.strip())
+    return m.group(1).strip() if m else None
+
+
 def set_flag(slug: str, item_id: str, flag: str, value: bool, root: Path | None = None) -> dict:
     """Set premium or cloud on an item. A filed item's cloud lane is fixed when it was filed, so only premium changes after filing."""
     if flag not in ("premium", "cloud"):
@@ -353,6 +369,7 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         checklist.update_piece(it, p["id"], {"task": task, "filed": stamp})
         it["meta"].setdefault("filed", stamp)                   # the first piece filed locks the item
+        it["meta"]["pipeline"] = format_pipeline_stamp(project["label"])
         it["dirty"] = True
         _write_entries(slug, entries, root)                     # each task exists now: record it before anything else can fail
         entry = {"piece": p["id"], "status": "filed", "repo": _target["targetRepo"], "task": task}
@@ -393,6 +410,7 @@ def file_item(slug: str, item_id: str, accept_lint: bool = False, root: Path | N
     premium = it["meta"].get("premium") == "true"
     it["meta"]["task"] = task
     it["meta"]["filed"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    it["meta"]["pipeline"] = format_pipeline_stamp(project["label"])
     it["dirty"] = True
     _write_entries(slug, entries, root)                  # the task exists now: record it before anything else can fail
     out = {"id": item_id, "task": task, "premium": premium, "warnings": warnings}

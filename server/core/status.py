@@ -11,6 +11,7 @@ coordinating, with subTasks) ticks only when every one of its pieces is finished
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,11 +42,21 @@ def find_task(pipeline_dir: str, task_id: str) -> tuple[str | None, dict | None]
     return None, None
 
 
-def _find_in_projects(projects: list[dict], preferred: str | None, task_id: str):
-    """(state, record, project) for the first project holding the task, trying the one labelled `preferred` first; else (None, None, None)."""
-    ordered = [p for p in projects if preferred and p.get("label") == preferred]
-    ordered += [p for p in projects if p not in ordered]
+def _find_in_projects(projects: list[dict], preferred: str | None, task_id: str, stamp: str | None = None):
+    """(state, record, project) for the first project holding the task, trying the one labelled `stamp` first (if registered), then `preferred`, then the rest; else (None, None, None)."""
+    ordered: list[dict] = []
+    if stamp:
+        stamped = [p for p in projects if p.get("label") == stamp]
+        if stamped:
+            ordered += stamped
+        else:
+            ordered.append(("__unregistered__", stamp))
+    if preferred:
+        ordered += [p for p in projects if p not in ordered and p.get("label") == preferred]
+    ordered += [p for p in projects if p not in ordered and p.get("label") != preferred]
     for project in ordered:
+        if isinstance(project, tuple):
+            continue
         state, rec = find_task(project["pipelineDir"], task_id)
         if state is not None:
             return state, rec, project
@@ -58,6 +69,15 @@ def _when(text: str | None):
     except (TypeError, ValueError):
         return None
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)      # queue history times carry no zone: they are UTC
+
+
+_STAMP_RE = re.compile(r"<!--[^>]*\bstamp\s*:\s*([A-Za-z0-9][\w\-]*)[^>]*>", re.I)
+
+
+def _parse_stamp(comment: str) -> str | None:
+    """The pipeline stamp recorded on a filed item, or None. The stamp is the project label that the task was filed into; sync() uses it to look there first."""
+    m = _STAMP_RE.search(comment)
+    return m.group(1) if m else None
 
 
 def _filed_at(item_meta: dict, record: dict):
@@ -125,7 +145,10 @@ def _classify(state: str, rec: dict, pipeline: str):
 def sync(slug: str, root: Path | None = None) -> dict:
     """Tick finished items and pieces and report every filed task's state:
     {'ticked': [keys], 'states': {key: {'state', 'status', 'reason'}}, 'ticked_by_reason': {category: count}}.
-    A key is an item id ('FF-4') or a piece ('FF-4/4c'). A step whose pieces are all done after this run is ticked too."""
+    A key is an item id ('FF-4') or a piece ('FF-4/4c'). A step whose pieces are all done after this run is ticked too.
+    Missing reasons are structured: 'registry_unreadable' (project registry cannot be read),
+    'stamp_unregistered' (item carries a pipeline stamp that does not match any registered project),
+    'not_in_any_pipeline' (no registered project holds the task)."""
     text = store.read_file(slug, "checklist.md", root)
     entries = checklist.parse(text)
     units = list(_units(entries))
@@ -136,19 +159,26 @@ def sync(slug: str, root: Path | None = None) -> dict:
     preferred = (target.get("name") if isinstance(target, dict) else None) or None
     try:
         projects = filing.all_projects()
-    except filing.FilingError:                          # no readable project registry: nothing can be found, so tasks read as missing
-        projects = []
+    except filing.FilingError as e:                      # no readable project registry: mark every task as registry_unreadable
+        for key, it, piece, meta in units:
+            out["states"][key] = {"state": "missing", "status": "", "reason": "registry_unreadable"}
+        return out
+    registered_labels = {p.get("label") for p in projects}
     rows = []
     finished: dict[str, list[str]] = {}                 # item id -> merge times of the pieces merged in this run
     for key, it, piece, meta in units:
-        state, rec, project = _find_in_projects(projects, preferred, meta["task"])
+        stamp = _parse_stamp(meta.get("comments", "") or "")
+        if stamp and stamp not in registered_labels:
+            out["states"][key] = {"state": "missing", "status": "", "reason": "stamp_unregistered"}
+            continue
+        state, rec, project = _find_in_projects(projects, preferred, meta["task"], stamp)
         if state is None:
-            out["states"][key] = {"state": "missing", "status": "", "reason": "missing"}
+            out["states"][key] = {"state": "missing", "status": "", "reason": "not_in_any_pipeline"}
             continue
         status = str((rec or {}).get("status", ""))
-        label, reason, stamp, category = _classify(state, rec or {}, project["pipelineDir"])
+        label, reason, tick_stamp, category = _classify(state, rec or {}, project["pipelineDir"])
         out["states"][key] = {"state": label, "status": status, "reason": reason}
-        if (piece["ticked"] if piece else it["ticked"]) or stamp is None:
+        if (piece["ticked"] if piece else it["ticked"]) or tick_stamp is None:
             continue
         minutes, ft = None, None
         if category == "merged":
@@ -157,12 +187,12 @@ def sync(slug: str, root: Path | None = None) -> dict:
             minutes = max(0, round((mt - ft).total_seconds() / 60)) if mt and ft else None
         took = {"took": str(minutes)} if minutes is not None else {}
         if piece:
-            checklist.update_piece(it, piece["id"], dict({"merged": stamp}, **took), ticked=True)
+            checklist.update_piece(it, piece["id"], dict({"merged": tick_stamp}, **took), ticked=True)
             if category == "merged":
-                finished.setdefault(it["id"], []).append(stamp)
+                finished.setdefault(it["id"], []).append(tick_stamp)
         else:
             it["ticked"] = True
-            it["meta"]["merged"] = stamp
+            it["meta"]["merged"] = tick_stamp
             if minutes is not None:
                 it["meta"]["took"] = str(minutes)
             it["dirty"] = True
