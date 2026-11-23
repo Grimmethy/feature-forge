@@ -169,8 +169,11 @@ def create_app(root: Path | None = None) -> Flask:
     @app.get("/api/features/<slug>/checklist")
     def get_checklist(slug):
         entries = checklist.parse(store.read_file(slug, "checklist.md", froot()))
+        for i in checklist.items(entries):
+            i["supersededBy"] = checklist.superseded_by(i["meta"])
         return jsonify([{"id": i["id"], "title": i["title"], "ticked": i["ticked"], "locked": checklist.is_locked(i),
                          "deps": checklist._deps(i), "body": "\n".join(checklist.plain_body(i)), "meta": i["meta"],
+                         "supersededBy": i.get("supersededBy") or None,
                          "pieces": checklist.pieces(i), "pieceDone": sum(p["ticked"] for p in checklist.pieces(i)),
                          "pieceTotal": len(checklist.pieces(i)),
                          "pieceUnfiled": sum(1 for p in checklist.pieces(i) if not p["ticked"] and not p["meta"].get("task")),

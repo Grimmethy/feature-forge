@@ -75,14 +75,21 @@ class ChecklistRouteTests(unittest.TestCase):
         self.assertEqual(rows["FF-1"]["pieces"][0], {"ticked": True, "id": "1a", "title": "One", "meta": {"merged": "abc1234"}, "body": ""})
         self.assertEqual((rows["FF-2"]["pieces"], rows["FF-2"]["pieceDone"], rows["FF-2"]["pieceTotal"]), ([], 0, 0))
 
+    def test_superseded_item_carries_superseded_by_and_piece_counts(self):
+        store.write_file(self.slug, "checklist.md", "# Checklist: Thing\n\n- [ ] FF-1 Parent <!-- deps: -->\n  Body.\n- [ ] FF-2 Replaced <!-- deps: FF-1 superseded: FF-3 -->\n  Old work.\n- [ ] FF-3 Replacement <!-- deps: FF-1 -->\n  New work.\n", self.root)
+        rows = {r["id"]: r for r in self.client.get(self.url("")).get_json()}
+        self.assertEqual(rows["FF-2"]["supersededBy"], "FF-3")
+        self.assertEqual((rows["FF-2"]["pieceDone"], rows["FF-2"]["pieceTotal"]), (0, 0))
+        self.assertEqual(rows["FF-1"]["supersededBy"], None)
+
     def test_the_real_checklist_lists_every_sub_piece_with_its_merge_commit(self):
         items = {i["id"]: i for i in checklist.items(checklist.parse(
             (repo_root / "features" / "feature-forge" / "checklist.md").read_text(encoding="utf-8")))}
         counts = {k: (sum(p["ticked"] for p in checklist.pieces(v)), len(checklist.pieces(v))) for k, v in items.items()}
-        self.assertEqual(counts, {"FF-1": (1, 1), "FF-2": (4, 4), "FF-3": (4, 4), "FF-4": (2, 3), "FF-5": (1, 1), "FF-6": (2, 2), "FF-7": (3, 4), "FF-8": (2, 2), "FF-9": (4, 4)})
+        self.assertEqual(counts, {"FF-1": (1, 1), "FF-2": (4, 4), "FF-3": (4, 4), "FF-4": (3, 3), "FF-5": (1, 1), "FF-6": (2, 2), "FF-7": (3, 7), "FF-8": (2, 2), "FF-9": (4, 4)})
         for item in items.values():
             for p in checklist.pieces(item):
-                self.assertEqual(p["ticked"], "merged" in p["meta"], p["title"])      # a ticked piece names its merge commit, an open one does not
+                self.assertTrue(p["ticked"] == ("merged" in p["meta"] or "manual" in p["meta"]), p["title"])      # a ticked piece has merged or manual: true
         self.assertIn("owner decision", checklist.pieces(items["FF-4"])[2]["meta"]["needs"])
 
     def test_unknown_feature_is_404(self):
@@ -142,7 +149,7 @@ class ChecklistRouteTests(unittest.TestCase):
         self.assertTrue(items["FF-2"]["ticked"])
         self.assertEqual((items["FF-2"]["meta"]["manual"], items["FF-2"]["meta"]["merged"]), ("true", "de08292"))
         self.assertTrue(items["FF-3"]["ticked"] and items["FF-3"]["meta"]["merged"] == "152ddcf")
-        self.assertFalse(items["FF-4"]["ticked"])
+        self.assertTrue(items["FF-4"]["ticked"])
         self.assertTrue(items["FF-5"]["ticked"] and items["FF-6"]["ticked"])
         self.assertEqual((items["FF-5"]["meta"]["merged"], items["FF-6"]["meta"]["merged"]), ("4c23ac9", "e9f3f6b"))
         self.assertFalse(items["FF-7"]["ticked"])
