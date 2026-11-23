@@ -24,9 +24,69 @@ class StoreTests(unittest.TestCase):
             self.assertTrue((self.root / slug / name).is_file(), name)
         self.assertIn("do the thing", store.read_file(slug, "request.md", self.root))
 
-    def test_slug_collisions_get_a_counter(self):
-        slugs = [store.create_feature("Same", x, self.root) for x in "abc"]
-        self.assertEqual(slugs, ["same", "same-2", "same-3"])
+    def test_duplicate_title_refused(self):
+        """Exact same title, exact same slug: second call raises DuplicateFeatureError."""
+        store.create_feature("Same", "first", self.root)
+        with self.assertRaises(store.DuplicateFeatureError):
+            store.create_feature("Same", "second", self.root)
+        # Only one feature directory should exist on disk.
+        self.assertEqual(len([d for d in self.root.iterdir() if d.is_dir()]), 1)
+
+    def test_duplicate_title_case_and_whitespace_variants_refused(self):
+        """Case and leading/trailing whitespace variants slug to the same thing and normalize to the same heading."""
+        store.create_feature("Same", "first", self.root)
+        for variant in ("SAME", "same", "  Same  ", "Same\t"):
+            with self.subTest(variant=variant):
+                with self.assertRaises(store.DuplicateFeatureError):
+                    store.create_feature(variant, "duplicate", self.root)
+        self.assertEqual(len([d for d in self.root.iterdir() if d.is_dir()]), 1)
+
+    def test_slug_equivalent_title_refused(self):
+        """Titles that slugify to the same slug are refused even if their normalized headings differ."""
+        store.create_feature("My Feature!", "first", self.root)
+        # "my-feature" is the slug for both; the second must refuse.
+        with self.assertRaises(store.DuplicateFeatureError):
+            store.create_feature("my-feature", "second", self.root)
+        with self.assertRaises(store.DuplicateFeatureError):
+            store.create_feature("MY FEATURE!", "third", self.root)
+        self.assertEqual(len([d for d in self.root.iterdir() if d.is_dir()]), 1)
+
+    def test_different_title_still_creates_entry(self):
+        """A genuinely different title is not refused — negative control."""
+        slug_a = store.create_feature("Alpha", "x", self.root)
+        slug_b = store.create_feature("Beta", "x", self.root)
+        self.assertNotEqual(slug_a, slug_b)
+        self.assertTrue((self.root / slug_a).is_dir())
+        self.assertTrue((self.root / slug_b).is_dir())
+
+    def test_concurrent_duplicate_titles_one_succeeds(self):
+        """Two threads racing the same title must produce exactly one success and one DuplicateFeatureError."""
+        import threading
+
+        results = []  # list of (slug-or-None, exception-or-None)
+
+        def attempt(title, idx):
+            try:
+                slug = store.create_feature(title, f"thread-{idx}", self.root)
+                results.append((slug, None))
+            except store.DuplicateFeatureError as e:
+                results.append((None, e))
+
+        t1 = threading.Thread(target=attempt, args=("Race", 1))
+        t2 = threading.Thread(target=attempt, args=("Race", 2))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        successes = [r for r in results if r[1] is None]
+        failures = [r for r in results if r[1] is not None]
+        self.assertEqual(len(successes), 1, f"expected exactly one success, got {successes}")
+        self.assertEqual(len(failures), 1, f"expected exactly one DuplicateFeatureError, got {failures}")
+        self.assertIsInstance(failures[0][1], store.DuplicateFeatureError)
+        self.assertEqual(len([d for d in self.root.iterdir() if d.is_dir()]), 1)
+
+
 
     def test_blank_title_is_refused(self):
         with self.assertRaises(store.StoreError):

@@ -94,6 +94,40 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/search?q=").get_json(), [])
         self.assertEqual(self.client.get("/api/search?q=zzzqqq").get_json(), [])
 
+    def test_duplicate_title_returns_409_with_exact_json(self):
+        self.make_alpha()
+        r = self.client.post("/api/features", json={"title": "Alpha Thing", "request": "duplicate"})
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.get_json(), {"error": 'A feature titled "Alpha Thing" already exists.'})
+        self.assertEqual(len(list(self.root.iterdir())), 1)
+
+    def test_case_variant_title_returns_409(self):
+        self.make_alpha()
+        r = self.client.post("/api/features", json={"title": "alpha thing", "request": "lowercase"})
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.get_json(), {"error": 'A feature titled "alpha thing" already exists.'})
+        self.assertEqual(len(list(self.root.iterdir())), 1)
+
+    def test_whitespace_variant_title_returns_409(self):
+        self.make_alpha()
+        r = self.client.post("/api/features", json={"title": "Alpha  Thing", "request": "extra space"})
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.get_json(), {"error": 'A feature titled "Alpha  Thing" already exists.'})
+        self.assertEqual(len(list(self.root.iterdir())), 1)
+
+    def test_concurrent_identical_titles_one_201_one_409(self):
+        import threading
+        results = []
+        def post():
+            results.append(self.client.post("/api/features", json={"title": "Concurrent Thing", "request": "thread"}).status_code)
+        threads = [threading.Thread(target=post) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sorted(results), [201, 409])
+        self.assertEqual(len(list(self.root.iterdir())), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -92,6 +92,10 @@ def create_app(root: Path | None = None) -> Flask:
         code = 502 if msg.startswith("chat plugin unavailable") else 404 if msg.startswith("no such") else 400
         return jsonify({"error": msg}), code
 
+    @app.errorhandler(store.DuplicateFeatureError)
+    def duplicate_feature_error(e: store.DuplicateFeatureError):
+        return jsonify({"error": f'A feature titled "{e.title}" already exists.'}), 409
+
     @app.get("/")
     def index():
         return send_from_directory(WEB_DIR, "index.html")
