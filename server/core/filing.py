@@ -274,7 +274,7 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
     if blocked and not accept_lint:
         raise FilingError(
             "polling language in piece(s) " + ", ".join(sorted(blocked)) + ": "
-            + " or ".join(w for w in warnings if any(w.startswith(b + ": " for b in blocked)))
+            + " or ".join(w for w in warnings if any(w.startswith(b + ": ") for b in blocked))
             + "; reword to use a trigger, or accept the warning"
         )
     todo = [p for p in todo if p["id"] not in blocked]
