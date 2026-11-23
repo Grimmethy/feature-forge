@@ -85,16 +85,32 @@ def is_locked(item: dict) -> bool:
 ITEM_ID_RE = re.compile(r"^[A-Za-z]+-\d+$")
 
 
-def superseded_by(item: dict) -> str | None:
-    """The item id (e.g. 'FF-3') named by an item's 'superseded' meta key, or None when the key is missing or holds free text
-    (the piece-level 'superseded: <reason>' marker is a reason, not an item id)."""
-    value = (item.get("meta") or {}).get("superseded", "").strip()
-    return value if ITEM_ID_RE.match(value) else None
+def superseded_by(meta: dict | None) -> str | None:
+    """Single source for the item-level 'superseded: FF-n' marker lookup.
+
+    Returns the 'FF-n' token (e.g. 'FF-3') from `meta` when it holds a
+    'superseded' key whose value matches 'FF-<digits>', stripped of
+    whitespace. Returns None for None, empty, or blank `meta`, or when the
+    value does not match the pattern.
+
+    Callers build the user-facing message 'superseded by FF-n' themselves
+    (e.g. when raising FilingError in subtask 2/3); this helper returns
+    only the token so there is one marker format in the repo.
+    """
+    if not meta:
+        return None
+    value = meta.get("superseded", "").strip()
+    if not value:
+        return None
+    return value if _SUPERSEDED_FF_RE.match(value) else None
+
+
+_SUPERSEDED_FF_RE = re.compile(r"^FF-\d+$")
 
 
 def count_done_total(entries: list[dict]) -> tuple[int, int]:
     """(done, total) over the items, leaving out any item superseded by another item. (0, 0) when none are left."""
-    live = [i for i in entries if i.get("kind", "item") == "item" and superseded_by(i) is None]
+    live = [i for i in entries if i.get("kind", "item") == "item" and superseded_by(i.get("meta")) is None]
     return sum(1 for i in live if i["ticked"]), len(live)
 
 
