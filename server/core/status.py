@@ -156,7 +156,7 @@ def sync(slug: str, root: Path | None = None) -> dict:
     if not units:
         return out
     target = grill.target_repo(slug, root)
-    preferred = (target.get("name") if isinstance(target, dict) else None) or None
+    preferred = target.get("name") if isinstance(target, dict) else None
     try:
         projects = filing.all_projects()
     except filing.FilingError as e:                      # no readable project registry: mark every task as registry_unreadable

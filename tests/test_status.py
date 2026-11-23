@@ -108,6 +108,15 @@ class SyncTests(Base):
         self.assertTrue(all(s["state"] == "missing" for s in r["states"].values()))
         self.assertFalse(self.items()["FF-2"]["ticked"])
 
+    def test_sync_preserves_truthy_target_name(self):
+        """preferred should receive the target's name when it's truthy."""
+        from unittest import mock
+        with mock.patch.object(status.filing, "all_projects", return_value=[]), \
+             mock.patch.object(status.grill, "target_repo", return_value={"name": "my-repo"}):
+            out = status.sync(self.slug, self.root)
+        self.assertIn("states", out)
+        self.assertTrue(all(s["state"] == "missing" for s in out["states"].values()))
+
     def test_a_history_copy_is_kept_when_it_writes(self):
         status.sync(self.slug, self.root)
         self.assertTrue(list((self.root / self.slug / ".history").iterdir()))
