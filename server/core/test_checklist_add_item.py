@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from server.core import checklist, store
+from server.core import checklist, checklist_deps, store
 
 
 class NextFreeIdTests(unittest.TestCase):
@@ -55,6 +55,34 @@ class AddItemTests(unittest.TestCase):
         checklist.add_item(self.slug, "Second", "", root=self.root)
         hist = self.root / self.slug / ".history"
         self.assertTrue(hist.is_dir() and any(hist.iterdir()))
+
+
+class DepsNormalizeValidateTests(unittest.TestCase):
+    def test_string_input(self):
+        self.assertEqual(checklist_deps.normalize_deps("FF-1, FF-2"), ["FF-1", "FF-2"])
+        self.assertEqual(checklist_deps.normalize_deps("FF-1 FF-2"), ["FF-1", "FF-2"])
+
+    def test_list_input(self):
+        self.assertEqual(checklist_deps.normalize_deps([" FF-1 ", "FF-2"]), ["FF-1", "FF-2"])
+
+    def test_empty_or_missing(self):
+        self.assertEqual(checklist_deps.normalize_deps(None), [])
+        self.assertEqual(checklist_deps.normalize_deps(""), [])
+        self.assertEqual(checklist_deps.normalize_deps("  "), [])
+        self.assertEqual(checklist_deps.normalize_deps([]), [])
+
+    def test_bad_type(self):
+        for bad in (5, {"a": 1}, [1]):
+            with self.assertRaises(ValueError):
+                checklist_deps.normalize_deps(bad)
+
+    def test_validate_known_ok(self):
+        checklist_deps.validate_deps(["FF-1"], ["FF-1", "FF-2"])
+
+    def test_validate_unknown(self):
+        with self.assertRaises(ValueError) as cm:
+            checklist_deps.validate_deps(["FF-1", "FF-99"], ["FF-1"])
+        self.assertIn("Unknown dependency: FF-99", str(cm.exception))
 
 
 if __name__ == "__main__":
