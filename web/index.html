@@ -78,6 +78,7 @@ form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px s
 </div>
 <div id="main">
   <div id="top"><span class="path" id="path">Pick a feature, or create one.</span><span id="file-msg" class="warn" style="display:none;margin-left:8px;font-size:13px"></span>
+    <button id="bSync" style="display:none" title="Pull latest checklist from the repo">Sync</button><small id="last-synced" style="color:var(--muted);margin-left:8px"></small>
     <button id="bRepo" style="display:none" title="Which repo is this feature built in?">Choose repo</button><button id="bGrill" class="primary" style="display:none" title="Interview me about this feature">&#128293; Grill</button><button id="bGraph" style="display:none" title="The dependency graph of this feature">Graph</button><button id="bView" class="on" style="display:none">View</button><button id="bEdit" style="display:none">Edit</button><button id="bSave" class="primary" style="display:none">Save</button></div>
   <div id="body"><div id="tree"></div><div id="view"></div><textarea id="edit" spellcheck="false"></textarea></div>
 </div>
@@ -94,7 +95,7 @@ form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px s
 <script>
 const $=id=>document.getElementById(id);
 const STATUSES=['Grilling','Planned','Filed','Building','Done'];
-let features=[],filter='All',cur=null,curPath=null,editing=false;
+let features=[],filter='All',cur=null,curPath=null,editing=false,lastSynced=null;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(m){const t=$('toast');t.textContent=m;t.classList.remove('show');void t.offsetWidth;t.classList.add('show')}
 async function api(url,opt){const r=await fetch(url,opt);const text=await r.text();let j;try{j=JSON.parse(text)}catch{j={}};if(!r.ok){const e=new Error(j.error||r.status);e.status=r.status;e.body=text;e.url=url;throw e};return j}
@@ -121,6 +122,15 @@ async function loadLibrary(){let r;try{r=await api('/api/features')}catch(e){
 function clearMain(){$('view').style.maxWidth='';$('view').style.display='block';$('edit').style.display='none';editing=false}
 function showButtons(on){['bRepo','bGrill','bGraph','bView','bEdit'].forEach(b=>$(b).style.display=on?'':'none');$('bSave').style.display='none'}
 let lintArmed=new Set(),taskStates={};
+async function syncChecklist(){
+  if(!cur)return false;
+  try{const r=await post(`/api/features/${cur}/sync`,{});taskStates=r.states||{};lastSynced=new Date();updateSyncLabel();if(r.ticked&&r.ticked.length){toast('Merged: '+r.ticked.join(', '));loadLibrary().catch(()=>{})}return true}
+  catch(e){taskStates={};return false}
+}
+function updateSyncLabel(){
+  const el=$('last-synced');if(!el)return;
+  el.textContent=lastSynced?'Last synced '+lastSynced.toLocaleTimeString():''
+}
 function piecesHtml(i){if(!(i.pieces||[]).length)return '';
   return '<ul class="pieces">'+i.pieces.map(p=>{const m=p.meta||{};
     return `<li class="piece ${p.ticked?'done':''}" data-piece="${esc(p.id)}"><input type="checkbox" disabled ${p.ticked?'checked':''}><b>${esc(p.id)}</b><span class="pt">${esc(p.title)}</span>${m.merged?`<span class="tag merged">merged ${esc(m.merged)}</span>`:''}${m.task?`<span class="tag" title="The Agent Manager task for this piece">task ${esc(m.task)}${(taskStates[i.id+'/'+p.id]||{}).state?' · '+esc(taskStates[i.id+'/'+p.id].state):''}</span>`:''}${m.needs?`<span class="tag need">needs: ${esc(m.needs)}</span>`:''}</li>`}).join('')+'</ul>'}
@@ -152,11 +162,31 @@ function wireChecklistAdd(){const f=$('checklist-add-form');if(!f)return;
     }catch(e){err.textContent=e.message||'Network error'}}}
 function checklistHtml(items){
   if(!items.length)return '<p><small>No checklist items yet.</small></p>';
-  return items.map(i=>{const m=i.meta||{};
-    return `<div class="row ${i.ticked?'done':''}" data-item="${esc(i.id)}"><input type="checkbox" disabled ${i.ticked?'checked':''}><span class="id">${esc(i.id)}</span>
+  const active=items.filter(i=>!i.supersededBy);
+  const superseded=items.filter(i=>i.supersededBy);
+  const doneCount=active.filter(i=>i.ticked).length;
+  const rows=[];
+  for(const i of active){
+    const m=i.meta||{};
+    rows.push(`<div class="row ${i.ticked?'done':''}" data-item="${esc(i.id)}"><input type="checkbox" disabled ${i.ticked?'checked':''}><span class="id">${esc(i.id)}</span>
     <span class="ti">${esc(i.title)}${m.premium==='true'?'<span class="tag">premium</span>':''}${m.cloud==='true'?'<span class="tag">cloud</span>':''}${i.locked?'<span class="tag lock">filed</span>':''}${m.took?`<span class="tag">took ${esc(m.took)} min</span>`:''}${m.changed?`<span class="tag">changed since filing ${esc(m.changed)}</span>`:''}${m.manual==='true'?'<span class="tag">ticked by hand</span>':''}
     ${i.pieceTotal?`<span class="tag" title="Sub-pieces done / total">${i.pieceDone}/${i.pieceTotal} pieces</span>`:''}${(i.deps||[]).length?`<br><small>after ${esc(i.deps.join(', '))}</small>`:''}${i.body?`<br><small>${esc(i.body)}</small>`:''}${piecesHtml(i)}</span>
-    <span class="acts">${actionsHtml(i)}</span></div>`}).join('');
+    <span class="acts">${actionsHtml(i)}</span></div>`);
+  }
+  for(const i of superseded){
+    rows.push(`<div class="row done" data-item="${esc(i.id)}" style="opacity:.65">
+      <span class="id">${esc(i.id)}</span>
+      <span class="ti" style="text-decoration:line-through">${esc(i.title)}</span>
+      <span class="tag" style="color:var(--muted);border-color:var(--muted)">superseded by ${esc(i.supersededBy)}</span>
+    </div>`);
+  }
+  return `<div id="checklist">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--line);margin-bottom:6px">
+      <span style="font-weight:600">Checklist</span>
+      <span style="color:var(--muted);font-size:13px">${doneCount}/${active.length}</span>
+    </div>
+    ${rows.join('')}
+  </div>`;
 }
 async function openFeature(slug,path){
   cur=slug;renderList();clearMain();showButtons(true);$('tree').style.display='block';refreshRepo().catch(()=>{});
@@ -169,7 +199,7 @@ async function openFile(path){
   $('path').textContent=`${cur}/${path}`;$('bView').className='on';$('bEdit').className='';$('bSave').style.display='none';
   document.querySelectorAll('#tree .f').forEach(e=>e.classList.toggle('on',e.dataset.p===path));
   if(path==='checklist.md'){
-    try{const r=await post(`/api/features/${cur}/sync`,{});taskStates=r.states||{};if(r.ticked&&r.ticked.length){toast('Merged: '+r.ticked.join(', '));loadLibrary().catch(()=>{})}}catch(e){taskStates={}}
+    await syncChecklist();
     $('view').innerHTML=checklistHtml(await api(`/api/features/${cur}/checklist`));$('view').insertAdjacentHTML('beforeend',checklistAddForm());wireChecklistAdd();return}
   const r=await api(`/api/features/${cur}/render?path=${encodeURIComponent(path)}`);$('view').innerHTML=r.html;
 }
