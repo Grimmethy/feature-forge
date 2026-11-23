@@ -57,6 +57,10 @@ def _sse(gen) -> Response:
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+def _norm_name(s):
+    return re.sub(r"[-_\s]+", " ", str(s or "")).strip().lower()
+
+
 def create_app(root: Path | None = None) -> Flask:
     app = Flask(__name__)
     app.config["FEATURE_ROOT"] = root
@@ -151,8 +155,20 @@ def create_app(root: Path | None = None) -> Flask:
     @app.get("/api/search")
     def search():
         q = request.args.get("q", "").strip().lower()
-        if not q:
-            return jsonify([])
+        nq = _norm_name(q)
+        if not nq:
+            return jsonify({"hits": [], "features": []})
+        features: list[dict] = []
+        for item in store.list_features(froot()):
+            title = item.get("title") or item.get("slug", "")
+            slug = item.get("slug", "")
+            nt = _norm_name(title)
+            ns = _norm_name(slug)
+            if nq in nt or nq in slug:
+                features.append({"slug": slug, "title": title if title else slug})
+        starts = [d for d in features if d["title"] and _norm_name(d["title"]).startswith(nq)]
+        rest = [d for d in features if d not in starts]
+        features = starts + rest
         hits: list[dict] = []
         for f in store.list_features(froot()):
             base = store.feature_dir(f["slug"], froot())
@@ -163,8 +179,8 @@ def create_app(root: Path | None = None) -> Flask:
                     snip = text[max(0, i - SNIPPET): i + len(q) + SNIPPET].replace("\n", " ")
                     hits.append({"slug": f["slug"], "path": p.relative_to(base).as_posix(), "snippet": snip})
                     if len(hits) >= SEARCH_CAP:
-                        return jsonify(hits)
-        return jsonify(hits)
+                        return jsonify({"hits": hits, "features": features})
+        return jsonify({"hits": hits, "features": features})
 
     @app.get("/api/features/<slug>/checklist")
     def get_checklist(slug):
