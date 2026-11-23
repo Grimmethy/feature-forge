@@ -186,9 +186,28 @@ function newForm(){
   cur=null;curPath=null;renderList();showButtons(false);$('tree').style.display='none';clearMain();$('path').textContent='New feature';
   $('view').innerHTML=`<form class="nf" id="nf"><h2>New feature</h2><input id="nt" placeholder="Title" required>
     <textarea id="nr" placeholder="What do you want built? Name the repo if you know it (a line 'repo: name' is picked up)."></textarea>
-    <div><button class="primary" type="submit">Create</button></div></form>`;
-  $('nf').onsubmit=async ev=>{ev.preventDefault();
-    try{const r=await post('/api/features',{title:$('nt').value,request:$('nr').value});await loadLibrary();await openFeature(r.slug)}catch(e){toast(e.message)}};
+    <div><button class="primary" id="nSubmit" type="submit">Create</button></div><small id="nf-error" class="warn" style="display:none"></small></form>`;
+  const submitting={current:false};
+  $('nf').onsubmit=async ev=>{
+    ev.preventDefault();
+    if(submitting.current)return;
+    const btn=$('nSubmit'),err=$('nf-error');
+    err.style.display='none';err.textContent='';
+    submitting.current=true;
+    btn.disabled=true;btn.textContent='Creating...';
+    try{
+      const r=await post('/api/features',{title:$('nt').value,request:$('nr').value});
+      features.push(r);renderList();
+      await openFeature(r.slug,'request.md');
+      toast('Feature created');
+    }catch(e){
+      btn.disabled=false;btn.textContent='Create';
+      err.style.display='';err.textContent=e.body?e.body:e.message||'Request failed';
+    }finally{
+      submitting.current=false;
+      if(!btn.disabled){btn.textContent='Create'}
+    }
+  };
 }
 async function runSearch(){
   const q=$('q').value.trim();if(!q)return;cur=null;renderList();showButtons(false);$('tree').style.display='none';clearMain();$('path').textContent=`Search: ${q}`;
