@@ -89,6 +89,14 @@ def project_for(repo_name: str) -> dict:
     raise NotRegisteredError(repo_name)
 
 
+def require_registered_project(repo_name: str, item_id: str) -> dict:
+    """project_for, but an unregistered repo is refused with the plain message, before anything is queued."""
+    try:
+        return project_for(repo_name)
+    except NotRegisteredError:
+        raise FilingError(f"Repo '{repo_name}' is not registered; {item_id} not filed")
+
+
 def all_projects() -> list[dict]:
     """Every project in the registry, as stored (keys label, repoRoot, pipelineDir, domainsPath).
     The list-all counterpart of project_for; status._find_in_projects consumes it.
@@ -192,7 +200,7 @@ def set_flag(slug: str, item_id: str, flag: str, value: bool, root: Path | None 
         raise FilingError(f"{item_id} is already filed; its lane was fixed when it was filed")
     if filed:
         tasks = [it["meta"]["task"]] if it["meta"].get("task") else [p["meta"]["task"] for p in checklist.pieces(it) if p["meta"].get("task") and not p["ticked"]]
-        project = project_for(grill.target_repo(slug, root)["name"])
+        project = require_registered_project(grill.target_repo(slug, root)["name"], item_id)
         for task in tasks:
             _post(f"/api/task-anywhere/{task}/premium-priority?project={project['repoRoot']}", {"enabled": bool(value)})
     it["meta"][flag] = "true" if value else "false"
@@ -393,11 +401,11 @@ def file_item(slug: str, item_id: str, accept_lint: bool = False, root: Path | N
     repo = grill.target_repo(slug, root)["name"]
     if not repo:
         raise FilingError("choose the repo for this feature first")
-    project = project_for(repo)
+    project = require_registered_project(repo, item_id)
     by_id = {i["id"]: i for i in checklist.items(entries)}
     item_repo = repo if has_pieces else item_repo_override(it, repo)
     if item_repo != repo:
-        project = project_for(item_repo)
+        project = require_registered_project(item_repo, item_id)
     dep_tasks = _item_dep_tasks(by_id, item_id, it)
     if has_pieces:
         return _file_pieces(slug, entries, it, item_id, piece, accept_lint, root, project, dep_tasks)
