@@ -371,6 +371,9 @@ def file_item(slug: str, item_id: str, accept_lint: bool = False, root: Path | N
     in order, each waiting for the one before (or just one piece when `piece` names it). Returns {id, task, premium, warnings} plus a `pieces`
     list with one entry per piece, each holding status (filed/blocked/failed) and target repo."""
     entries, it = _item(slug, item_id, root)
+    superseded = checklist.superseded_by(it["meta"])
+    if superseded:
+        raise FilingError(f"superseded by {superseded}")
     if it["ticked"]:
         raise FilingError(f"{item_id} is already done")
     has_pieces = bool(checklist.pieces(it))
