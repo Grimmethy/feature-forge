@@ -24,9 +24,12 @@ class StoreTests(unittest.TestCase):
             self.assertTrue((self.root / slug / name).is_file(), name)
         self.assertIn("do the thing", store.read_file(slug, "request.md", self.root))
 
-    def test_slug_collisions_get_a_counter(self):
-        slugs = [store.create_feature("Same", x, self.root) for x in "abc"]
-        self.assertEqual(slugs, ["same", "same-2", "same-3"])
+    def test_slug_collisions_raise_duplicate_feature_error(self):
+        store.create_feature("Same", "first", self.root)
+        with self.assertRaises(store.DuplicateFeatureError):
+            store.create_feature("Same", "second", self.root)
+        # Only one feature directory should exist
+        self.assertEqual(len([d for d in self.root.iterdir() if d.is_dir()]), 1)
 
     def test_blank_title_is_refused(self):
         with self.assertRaises(store.StoreError):

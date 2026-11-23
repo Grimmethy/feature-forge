@@ -29,6 +29,16 @@ class StoreError(RuntimeError):
     pass
 
 
+class DuplicateFeatureError(StoreError):
+    """Raised when a feature with the same normalized title or slug already exists."""
+    pass
+
+
+def _normalize_title(title: str) -> str:
+    """Trim, collapse whitespace, lowercase."""
+    return re.sub(r"\s+", " ", (title or "").strip()).lower()
+
+
 def _root(root: Path | None) -> Path:
     return Path(root) if root is not None else DEFAULT_ROOT
 
@@ -88,22 +98,49 @@ def create_feature(title: str, request_text: str, root: Path | None = None, tags
     title = (title or "").strip()
     if not title:
         raise StoreError("title is required")
-    base, slug, n = _root(root), slugify(title), 1
-    while (base / slug).exists():
-        n += 1
-        slug = f"{slugify(title)}-{n}"
+    base = _root(root)
+    slug = slugify(title)
+    norm = _normalize_title(title)
+
+    # Check for duplicates: same slug OR same normalized heading in request.md
+    if base.is_dir():
+        for candidate in base.iterdir():
+            if not candidate.is_dir() or candidate.name.startswith("."):
+                continue
+            # Slug collision
+            if candidate.name == slug:
+                raise DuplicateFeatureError(f"duplicate feature slug: {slug}")
+            # Normalized heading collision
+            req = candidate / "request.md"
+            if req.is_file():
+                try:
+                    head_match = re.search(r"^# (.+)$", req.read_text(encoding="utf-8"), re.M)
+                    if head_match and _normalize_title(head_match.group(1)) == norm:
+                        raise DuplicateFeatureError(f"duplicate feature title: {title}")
+                except DuplicateFeatureError:
+                    raise
+                except Exception:
+                    pass
+
+    base.mkdir(parents=True, exist_ok=True)  # ensure parent collection exists
     d = base / slug
-    d.mkdir(parents=True)
-    body = (request_text or "").strip()
-    tags_line = ""
-    if tags:
-        clean = normalise_tags(tags)
-        if clean:
-            tags_line = "tags: " + ", ".join(clean) + "\n"
-    d.joinpath("request.md").write_text(f"# {title}\n{tags_line}\n{body}\n", encoding="utf-8")
-    d.joinpath("plan.md").write_text(f"# Plan: {title}\n\n_Not started._\n", encoding="utf-8")
-    d.joinpath("interview.md").write_text(f"# Interview: {title}\n\n_Not started._\n", encoding="utf-8")
-    d.joinpath("checklist.md").write_text(f"# Checklist: {title}\n\n", encoding="utf-8")
+    d.mkdir()  # non-recursive; FileExistsError → duplicate
+    created_dir = True
+    try:
+        body = (request_text or "").strip()
+        tags_line = ""
+        if tags:
+            clean = normalise_tags(tags)
+            if clean:
+                tags_line = "tags: " + ", ".join(clean) + "\n"
+        d.joinpath("request.md").write_text(f"# {title}\n{tags_line}\n{body}\n", encoding="utf-8")
+        d.joinpath("plan.md").write_text(f"# Plan: {title}\n\n_Not started._\n", encoding="utf-8")
+        d.joinpath("interview.md").write_text(f"# Interview: {title}\n\n_Not started._\n", encoding="utf-8")
+        d.joinpath("checklist.md").write_text(f"# Checklist: {title}\n\n", encoding="utf-8")
+    except BaseException:
+        if created_dir and d.is_dir():
+            shutil.rmtree(d)
+        raise
     return slug
 
 
