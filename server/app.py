@@ -157,7 +157,7 @@ def create_app(root: Path | None = None) -> Flask:
         q = request.args.get("q", "").strip().lower()
         nq = _norm_name(q)
         if not nq:
-            return jsonify({"hits": [], "features": []})
+            return jsonify({"features": [], "files": []})
         features: list[dict] = []
         for item in store.list_features(froot()):
             title = item.get("title") or item.get("slug", "")
@@ -169,18 +169,21 @@ def create_app(root: Path | None = None) -> Flask:
         starts = [d for d in features if d["title"] and _norm_name(d["title"]).startswith(nq)]
         rest = [d for d in features if d not in starts]
         features = starts + rest
-        hits: list[dict] = []
+        feature_slugs = {d["slug"] for d in features}
+        files: list[dict] = []
         for f in store.list_features(froot()):
+            if f["slug"] in feature_slugs:
+                continue
             base = store.feature_dir(f["slug"], froot())
             for p in _md_files(f["slug"], froot()):
                 text = p.read_text(encoding="utf-8")
                 i = text.lower().find(q)
                 if i >= 0:
                     snip = text[max(0, i - SNIPPET): i + len(q) + SNIPPET].replace("\n", " ")
-                    hits.append({"slug": f["slug"], "path": p.relative_to(base).as_posix(), "snippet": snip})
-                    if len(hits) >= SEARCH_CAP:
-                        return jsonify({"hits": hits, "features": features})
-        return jsonify({"hits": hits, "features": features})
+                    files.append({"slug": f["slug"], "path": p.relative_to(base).as_posix(), "snippet": snip})
+                    if len(files) >= SEARCH_CAP:
+                        return jsonify({"features": features, "files": files})
+        return jsonify({"features": features, "files": files})
 
     @app.get("/api/features/<slug>/checklist")
     def get_checklist(slug):
