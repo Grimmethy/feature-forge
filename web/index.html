@@ -74,7 +74,7 @@ form.rf select,form.rf input{background:var(--bg);color:var(--text);border:1px s
   <div style="display:flex;gap:6px;padding:6px 12px 0"><button id="bBoard" title="Every item of every feature in three columns">Board</button><button id="bRepos" title="Features grouped by the repo they are built in">By repo</button><button id="bProposals" title="Scouted proposals ranked by value">Proposals</button></div>
   <input id="q" placeholder="Search every feature (press Enter)">
   <div id="filters"></div>
-  <div id="list"></div>
+  <div id="list"><div id="feature-list-status" class="card" role="status" aria-live="polite"><small>Loading features...</small></div></div>
 </div>
 <div id="main">
   <div id="top"><span class="path" id="path">Pick a feature, or create one.</span><span id="file-msg" class="warn" style="display:none;margin-left:8px;font-size:13px"></span>
@@ -112,7 +112,11 @@ function renderList(){
     <small>${f.ticked}/${f.total} done${f.repo?' · '+esc(f.repo):''}</small><div class="bar"><i style="width:${pct}%"></i></div></div>`}).join('')
     :'<div class="card"><small>No features in this view.</small></div>';
 }
-async function loadLibrary(){features=await api('/api/features');renderFilters();renderList()}
+async function loadLibrary(){let r;try{r=await api('/api/features')}catch(e){
+  if($('feature-list-status')||!features.length){$('list').innerHTML=`<div id="feature-list-status" class="card" role="status"><small>Could not load features. ${esc(e.message)}</small> <button id="bListRetry">Retry</button></div>`;
+    $('bListRetry').onclick=()=>{$('list').innerHTML='<div id="feature-list-status" class="card" role="status" aria-live="polite"><small>Loading features...</small></div>';loadLibrary().catch(()=>{})}}
+  throw e}
+  features=r;renderFilters();renderList()}
 
 function clearMain(){$('view').style.maxWidth='';$('view').style.display='block';$('edit').style.display='none';editing=false}
 function showButtons(on){['bRepo','bGrill','bGraph','bView','bEdit'].forEach(b=>$(b).style.display=on?'':'none');$('bSave').style.display='none'}
