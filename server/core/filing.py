@@ -19,6 +19,7 @@ import urllib.request
 from pathlib import Path
 
 from . import checklist, grill, parallel_files, store
+from .piece_repo import is_repo_header_line, parse_piece_repo
 from .piece_repo_lint import lint_piece_repo_mismatch
 from .piece_routing import route_pieces
 
@@ -119,6 +120,14 @@ def _plan_excerpt(slug: str, root) -> str:
     return plan[:PLAN_CAP] + ("\n[plan cut here]" if len(plan) > PLAN_CAP else "")
 
 
+def item_repo_override(item: dict, feature_repo: str | None = None) -> str | None:
+    """The repo an item names with its own `Repo:` line (via piece_repo.parse_piece_repo), else the feature repo."""
+    body = item.get("body") or ""
+    if not isinstance(body, str):
+        body = "\n".join(body)
+    return parse_piece_repo(body) or feature_repo
+
+
 def record_text(slug: str, item_id: str, root: Path | None = None, piece_id: str | None = None) -> str:
     """The self-contained task text for an item, or for one of its pieces: the job, its place in the feature, the plan excerpt and the standard clause."""
     _, it = _item(slug, item_id, root)
@@ -154,7 +163,10 @@ def record_text(slug: str, item_id: str, root: Path | None = None, piece_id: str
         parts.append(STANDARD_CLAUSE)
         return "\n\n".join(parts)
     deps = [d for d in re.split(r"[,\s]+", it["meta"].get("deps", "")) if d]
-    body = "\n".join(it["body"]).strip()
+    repo = item_repo_override(it, repo)
+    # Raw `Repo:` lines are dropped from the queued text only (new string; the stored checklist is untouched).
+    # An `<!-- repo: -->` marker is left in place.
+    body = "\n".join(l for l in it["body"] if not is_repo_header_line(l)).strip()
     parts = [f"{item_id} of feature '{slug}': {it['title']}", f"Repo: {repo}.", body or "(no further detail in the checklist item)"]
     if deps:
         parts.append(f"This item waits for: {', '.join(deps)} (their tasks are this task's dependsOn).")
@@ -383,6 +395,9 @@ def file_item(slug: str, item_id: str, accept_lint: bool = False, root: Path | N
         raise FilingError("choose the repo for this feature first")
     project = project_for(repo)
     by_id = {i["id"]: i for i in checklist.items(entries)}
+    item_repo = repo if has_pieces else item_repo_override(it, repo)
+    if item_repo != repo:
+        project = project_for(item_repo)
     dep_tasks = _item_dep_tasks(by_id, item_id, it)
     if has_pieces:
         return _file_pieces(slug, entries, it, item_id, piece, accept_lint, root, project, dep_tasks)
