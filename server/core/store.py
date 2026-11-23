@@ -31,7 +31,10 @@ class StoreError(RuntimeError):
 
 class DuplicateFeatureError(StoreError):
     """Raised when a feature with the same normalized title or slug already exists."""
-    pass
+
+    def __init__(self, message: str, title: str = ""):
+        super().__init__(message)
+        self.title = (title or "").strip()
 
 
 def _normalize_title(title: str) -> str:
@@ -109,14 +112,14 @@ def create_feature(title: str, request_text: str, root: Path | None = None, tags
                 continue
             # Slug collision
             if candidate.name == slug:
-                raise DuplicateFeatureError(f"duplicate feature slug: {slug}")
+                raise DuplicateFeatureError(f"duplicate feature slug: {slug}", title=title)
             # Normalized heading collision
             req = candidate / "request.md"
             if req.is_file():
                 try:
                     head_match = re.search(r"^# (.+)$", req.read_text(encoding="utf-8"), re.M)
                     if head_match and _normalize_title(head_match.group(1)) == norm:
-                        raise DuplicateFeatureError(f"duplicate feature title: {title}")
+                        raise DuplicateFeatureError(f"duplicate feature title: {title}", title=title)
                 except DuplicateFeatureError:
                     raise
                 except Exception:
