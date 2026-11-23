@@ -82,6 +82,22 @@ def is_locked(item: dict) -> bool:
     return bool(item["meta"].get("task") or item["meta"].get("filed"))
 
 
+ITEM_ID_RE = re.compile(r"^[A-Za-z]+-\d+$")
+
+
+def superseded_by(item: dict) -> str | None:
+    """The item id (e.g. 'FF-3') named by an item's 'superseded' meta key, or None when the key is missing or holds free text
+    (the piece-level 'superseded: <reason>' marker is a reason, not an item id)."""
+    value = (item.get("meta") or {}).get("superseded", "").strip()
+    return value if ITEM_ID_RE.match(value) else None
+
+
+def count_done_total(entries: list[dict]) -> tuple[int, int]:
+    """(done, total) over the items, leaving out any item superseded by another item. (0, 0) when none are left."""
+    live = [i for i in entries if i.get("kind", "item") == "item" and superseded_by(i) is None]
+    return sum(1 for i in live if i["ticked"]), len(live)
+
+
 def _deps(item: dict) -> list[str]:
     return [d for d in re.split(r"[,\s]+", item["meta"].get("deps", "")) if d]
 
