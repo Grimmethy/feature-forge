@@ -72,9 +72,13 @@ def _filed_at(item_meta: dict, record: dict):
 def _units(entries):
     """(key, item, piece or None, meta) for every filed task: an item's own task, and each piece's task (key 'FF-4/4c')."""
     for it in checklist.items(entries):
+        if checklist.superseded_by(it["meta"]):
+            continue
         if it["meta"].get("task"):
             yield it["id"], it, None, it["meta"]
         for p in checklist.pieces(it):
+            if checklist.superseded_by(p["meta"]):
+                continue
             if p["meta"].get("task"):
                 yield f"{it['id']}/{p['id']}", it, p, p["meta"]
 
