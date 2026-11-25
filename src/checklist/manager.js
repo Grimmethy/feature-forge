@@ -12,6 +12,9 @@ const router = express.Router();
 const itemStore = new Map();
 let nextItemId = 1;
 
+// Item status constants
+const STATUS_SUPERSEDED = 'superseded';
+
 /**
  * File a new item into the checklist system.
  * @param {Object} item - The item to file with text, dependsOn, repo, premium
@@ -51,7 +54,7 @@ function markSuperseded(id) {
   if (!item) {
     throw new Error(`Item ${id} not found`);
   }
-  item.status = 'superseded';
+  item.status = STATUS_SUPERSEDED;
   item.supersededAt = new Date().toISOString();
   return item;
 }
