@@ -334,20 +334,15 @@ def create_app(root: Path | None = None) -> Flask:
 
     @app.post("/api/grill/sessions/<session_id>/retry")
     def grill_retry(session_id):
-        """Retry a failed session. Returns 409 if the session is not failed or has no last round."""
+        """Retry a failed session. Returns 201 if the session is restarted (no rounds), 409 if not failed."""
         # Find the slug for this session_id
         for slug_data in store.list_features(froot()):
             slug = slug_data["slug"]
             try:
-                meta = grill.load_meta(slug, session_id, froot())
-                # Check if the session is failed
-                if not meta.get("failed"):
-                    return jsonify({"error": "Session is not in a failed state"}), 409
-                last_round = meta["failed"].get("last_round")
-                if not last_round:
-                    return jsonify({"error": "Session has no last round to retry"}), 409
-                # Clear the failed state
                 result = grill.retry_session(slug, session_id, froot())
+                # Check if the session was restarted (no rounds)
+                if result.get("restarted"):
+                    return jsonify(result), 201
                 return jsonify(result), 200
             except grill.GrillError as e:
                 return jsonify({"error": str(e)}), 409

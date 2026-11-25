@@ -321,18 +321,42 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
 
 
 def retry_session(slug: str, sid: str, root: Path | None = None) -> dict:
-    """Check if a session can be retried. Returns the last round info and clears the failed state."""
+    """Check if a session can be retried. Returns the last round info and clears the failed state.
+    
+    When the session has no rounds (no failed state or no last_round), restarts the session
+    from the beginning and returns the new session meta.
+    """
     meta = load_meta(slug, sid, root)
     failed = meta.get("failed")
     if not failed:
-        raise GrillError("session is not in a failed state")
+        # No failed state: restart the session from the beginning
+        return _restart_session(slug, sid, root)
     last_round = failed.get("last_round")
     if not last_round:
-        raise GrillError("session has no last round to retry")
+        # No last round: restart the session from the beginning
+        return _restart_session(slug, sid, root)
     # Clear the failed state
     meta.pop("failed", None)
     save_meta(slug, meta, root)
     return {"session_id": sid, "round": last_round}
+
+
+def _restart_session(slug: str, sid: str, root: Path | None = None) -> dict:
+    """Restart a session from the beginning. Returns the new session meta."""
+    # Get the original node from the current meta
+    current_meta = load_meta(slug, sid, root)
+    node = current_meta.get("node", "feature")
+    account = current_meta.get("account")
+    
+    # Start a new session with the same parameters
+    new_meta = start(slug, node=node, account=account, root=root)
+    
+    # Return a result indicating the session was restarted
+    return {
+        "session_id": new_meta["id"],
+        "restarted": True,
+        "message": "Session restarted from the beginning"
+    }
 
 
 def extract_proposal(text: str) -> dict:
