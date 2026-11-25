@@ -362,7 +362,7 @@ async function gstream(url,body){
   }catch(e){bub.className='gm sys';bub.textContent='Error: '+e.message;$('gsend').disabled=false;return false}
   $('gsend').disabled=false;$('grill').setAttribute('data-state','ready');return true}
 function gKilled(ev){const d=gadd('sys','The interviewer was stopped (killed by the system, usually memory pressure). Nothing was lost.');const b=document.createElement('button');b.textContent='Retry';b.onclick=()=>gRetry(ev.session_id||(G&&G.sid),b);d.appendChild(b)}
-async function gRetry(sid,b){b.disabled=true;try{const r=await post(`/grill/sessions/${sid}/retry`,{});b.remove();gadd('sys',`Retried from round ${r.round}. Send your answer to continue.`)}catch(e){b.disabled=false;gadd('sys','Retry failed: '+e.message)}}
+async function gRetry(sid,b){b.disabled=true;try{const r=await post(`/api/grill/sessions/${sid}/retry`,{});b.remove();gadd('sys',`Retried from round ${r.round}. Send your answer to continue.`)}catch(e){b.disabled=false;gadd('sys','Retry failed: '+e.message)}}
 $('bGrill').onclick=()=>{if(!G)gNode='feature';openGrill()};
 $('gclose').onclick=()=>{$('grill').style.display='none'};
 $('gstart').onclick=async()=>{
