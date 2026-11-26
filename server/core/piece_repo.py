@@ -12,7 +12,7 @@ lines are removed by ``strip_repo_header``; later ``Repo:`` lines are kept.
 """
 import re
 
-_REPO_LINE_RE = re.compile(r"^Repo:[ \t]*(\S+?)\.?[ \t]*$")
+_REPO_LINE_RE = re.compile(r"^Repo:\s+([^\s.]+)")
 _REPO_MARKER_RE = re.compile(r"<!--\s*repo:\s*([^\s>]+?)\s*-->", re.IGNORECASE)
 _PIECE_START_RE = re.compile(r"^\s*(- \[|#)")
 

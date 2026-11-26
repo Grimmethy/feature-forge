@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 from . import store
+from . import piece_repo
 from .checklist_pieces import join_item_body, split_item_body, next_piece_label, _increment_label
 
 META_ORDER = ("task", "premium", "cloud", "deps", "after", "filed", "manual", "merged", "changed", "pipeline")
@@ -93,17 +94,26 @@ PIECE_LABEL_RE = re.compile(r"^(\d+[a-z]*\d*)\s+(.+)$")        # a leading label
 
 
 def pieces(item: dict) -> list[dict]:
-    """The sub-pieces of an item: [{'ticked', 'id', 'title', 'meta', 'body'}] from its '- [x] 4a title <!-- key: value -->' body lines, in order.
-    Lines under a piece that are indented two more spaces are that piece's own text ('body'), the task text a worker will see."""
+    """The sub-pieces of an item: [{'ticked', 'id', 'title', 'meta', 'body', 'repo'}] from its '- [x] 4a title <!-- key: value -->' body lines, in order.
+    Lines under a piece that are indented two more spaces are that piece's own text ('body'), the task text a worker will see.
+    Each piece carries a 'repo' key parsed from a 'Repo: <name>' line in its title+body; pieces without one inherit the parent feature's repo (set by the caller)."""
     out = []
     for line in item["body"]:
         m = PIECE_RE.match(line)
         if m:
             label = PIECE_LABEL_RE.match(m.group(2).strip())
-            out.append({"ticked": m.group(1) != " ", "id": label.group(1) if label else "",
-                        "title": label.group(2) if label else m.group(2).strip(), "meta": store._parse_meta(m.group(3)), "body": ""})
+            piece = {"ticked": m.group(1) != " ", "id": label.group(1) if label else "",
+                     "title": label.group(2) if label else m.group(2).strip(), "meta": store._parse_meta(m.group(3)), "body": ""}
+            out.append(piece)
         elif out and line.startswith("  "):
             out[-1]["body"] = (out[-1]["body"] + "\n" + line[2:]).strip("\n")
+        elif out and line.startswith("Repo:"):
+            # Repo: line at the same indentation as the piece header — include in body for parsing
+            out[-1]["body"] = (out[-1]["body"] + "\n" + line).strip("\n")
+    # Second pass: parse Repo: line from each piece's title+body
+    for piece in out:
+        piece_text = f"{piece['title']}\n{piece['body']}"
+        piece["repo"] = piece_repo.parse_piece_repo(piece_text)
     return out
 
 

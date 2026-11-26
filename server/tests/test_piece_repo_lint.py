@@ -63,5 +63,54 @@ class LintPieceRepoMismatchTest(unittest.TestCase):
         self.assertEqual(pieces, snapshot)
 
 
+class PieceRepoParsingTest(unittest.TestCase):
+    """FF-1: pieces() sets a repo key from a Repo: line, accepting trailing text."""
+
+    def _parse_pieces(self, body_lines):
+        """Build a fake item dict and call checklist.pieces() via the lint helper."""
+        from core import checklist
+        item = {"body": body_lines}
+        return checklist.pieces(item)
+
+    def test_bare_repo_line(self):
+        """A piece with a bare Repo: line gets repo == 'foo'."""
+        pieces = self._parse_pieces(["- [ ] 1a Title", "Repo: foo"])
+        self.assertEqual(len(pieces), 1)
+        self.assertEqual(pieces[0]["repo"], "foo")
+
+    def test_repo_line_with_trailing_text(self):
+        """Repo: name (extra text) resolves to the first token; trailing text still flagged by lint."""
+        pieces = self._parse_pieces(["- [ ] 1b Title", "Repo: agent-manager-pipeline-ops (src/x.js)"])
+        self.assertEqual(len(pieces), 1)
+        self.assertEqual(pieces[0]["repo"], "agent-manager-pipeline-ops")
+        # Lint should still warn about trailing text (repo differs from feature repo)
+        warnings = piece_repo_lint.lint_piece_repo_mismatch(
+            pieces, "other-repo", _resolver_to("other-repo")
+        )
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("agent-manager-pipeline-ops", warnings[0])
+
+    def test_no_repo_line_inherits(self):
+        """A piece with no Repo: line has repo == None (caller inherits)."""
+        pieces = self._parse_pieces(["- [ ] 1c Title", "just body text"])
+        self.assertEqual(len(pieces), 1)
+        self.assertIsNone(pieces[0]["repo"])
+
+    def test_indented_body_with_repo_line(self):
+        """A Repo: line followed by indented body parses correctly."""
+        pieces = self._parse_pieces([
+            "- [ ] 1d Title",
+            "Repo: repo-d",
+            "  indented line 1",
+            "  indented line 2",
+        ])
+        self.assertEqual(len(pieces), 1)
+        self.assertEqual(pieces[0]["repo"], "repo-d")
+        # Repo: line is included in body for parsing
+        self.assertIn("Repo: repo-d", pieces[0]["body"])
+        self.assertIn("indented line 1", pieces[0]["body"])
+        self.assertIn("indented line 2", pieces[0]["body"])
+
+
 if __name__ == "__main__":
     unittest.main()
