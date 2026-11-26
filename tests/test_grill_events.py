@@ -156,3 +156,45 @@ class GrillEventsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_memory_pressure_text_only_when_high(self):
+        """Verify that the memory pressure message only appears when actual pressure is high."""
+        # Test with LOW pressure (should show exit code/signal)
+        def low_pressure(method, path, body=None, timeout=None, stream=False):
+            return _StubStream(["data: {\\\"type\\\": \\\"error\\\", \\\"error\\\": \\\"claude -p failed: exit=137 signal=SIGKILL\\\"}"])
+        
+        with mock.patch.object(grill, "_read_meminfo", return_value={
+            "MemAvailable": "2000000",  # 2GB
+            "SwapTotal": "1000000",
+            "SwapFree": "900000"  # 90% free, 10% used
+        }):
+            events = _events(self._run("hello", low_pressure))
+        errors = [e for e in events if e.get("type") == "error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("exit=137", errors[0]["message"])
+        self.assertNotIn("memory pressure", errors[0]["message"].lower())
+        
+        # Test with HIGH pressure (should show memory pressure)
+        def high_pressure(method, path, body=None, timeout=None, stream=False):
+            return _StubStream(["data: {\\\"type\\\": \\\"error\\\", \\\"error\\\": \\\"claude -p failed: exit=137 signal=SIGKILL\\\"}"])
+        
+        with mock.patch.object(grill, "_read_meminfo", return_value={
+            "MemAvailable": "100000",  # 100MB
+            "SwapTotal": "1000000",
+            "SwapFree": "100000"  # 90% used
+        }):
+            events = _events(self._run("hello", high_pressure))
+        errors = [e for e in events if e.get("type") == "error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("memory pressure", errors[0]["message"].lower())
+
+    def test_empty_stream_shows_different_message(self):
+        """Verify that an empty stream (no content) shows a distinct error message."""
+        def empty_stream(method, path, body=None, timeout=None, stream=False):
+            return _StubStream([])
+        
+        events = _events(self._run("hello", empty_stream))
+        errors = [e for e in events if e.get("type") == "error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Empty response", errors[0]["message"])
+        self.assertFalse(errors[0].get("retryable"))

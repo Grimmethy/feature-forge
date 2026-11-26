@@ -52,6 +52,34 @@ def _parse_exit_signal(message: str) -> tuple[str, str]:
     return (m.group(1), m.group(2)) if m else ("unknown", "unknown")
 
 
+def _write_grill_log(slug: str, sid: str, message: str, exit_code: str, signal: str, mem_info: dict, root: Path | None = None) -> None:
+    """Append a timestamped failure entry to .grill/log.md in the feature directory."""
+    try:
+        log_path = store.feature_dir(slug, root) / ".grill" / "log.md"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        entry = (
+            f"## {timestamp} - Session {sid} Failed\n\n"
+            f"- **Reason**: {message}\n"
+            f"- **Exit Code**: {exit_code}\n"
+            f"- **Signal**: {signal}\n"
+            f"- **MemAvailable**: {mem_info.get('MemAvailable', 'unknown')} kB\n"
+            f"- **SwapTotal**: {mem_info.get('SwapTotal', 'unknown')} kB\n"
+            f"- **SwapFree**: {mem_info.get('SwapFree', 'unknown')} kB\n\n"
+        )
+        
+        # Append to existing log or create new one
+        if log_path.exists():
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(entry)
+        else:
+            log_path.write_text(f"# Grill Session Log\n\n{entry}", encoding="utf-8")
+    except (OSError, IOError) as e:
+        # Silently fail if we can't write the log - don't want to crash on this
+        print(f"[grill] failed to write log: {e}", file=sys.stderr, flush=True)
+
+
 def _read_meminfo() -> dict[str, str]:
     """Read MemAvailable, SwapTotal, SwapFree from /proc/meminfo; 'unknown' if missing."""
     result = {"MemAvailable": "unknown", "SwapTotal": "unknown", "SwapFree": "unknown"}
@@ -270,6 +298,7 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
     turn = int(meta.get("turns") or 0) + 1      # a retried turn reuses its number: the count only advances after the model accepts it
     yield _sse_frame({"type": "turn-start", "turn": turn, "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "phase": "model"})
     terminal_sent = False
+    content_seen = False
     try:
         resp = _call("POST", f"/api/chat/{sid}/message", {"message": text}, timeout=TURN_TIME_LIMIT_S, stream=True)
         meta["turns"] = turn
@@ -299,14 +328,31 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
                         frame["killed"] = True
                         frame["code"] = "interviewer_killed"
                         frame["session_id"] = sid
-                        frame["message"] = "The interviewer was stopped (killed by the system, usually memory pressure). Nothing was lost."
                         frame["last_round"] = turn
-                        # Write a structured log line with memory info
+                        # Check actual memory pressure before claiming it
                         mem_info = _read_meminfo()
+                        mem_available_kb = int(mem_info["MemAvailable"]) if mem_info["MemAvailable"] != "unknown" else 0
+                        swap_total_kb = int(mem_info["SwapTotal"]) if mem_info["SwapTotal"] != "unknown" else 0
+                        swap_free_kb = int(mem_info["SwapFree"]) if mem_info["SwapFree"] != "unknown" else 0
+                        swap_used_pct = ((swap_total_kb - swap_free_kb) / swap_total_kb * 100) if swap_total_kb > 0 else 0
+                        mem_available_mb = mem_available_kb / 1024
+                        
+                        # Only claim memory pressure if actually under pressure
+                        if mem_available_mb < 500 or swap_used_pct > 80:
+                            frame["message"] = f"The interviewer was killed (memory pressure: {int(mem_available_mb)}MB available, {int(swap_used_pct)}% swap used). Nothing was lost."
+                        else:
+                            frame["message"] = f"The interviewer was killed (exit={code}, signal={sig}). Nothing was lost."
+                        
+                        # Write a structured log line with memory info
                         print(f"interviewer_killed exit_code={code} signal={sig} MemAvailable={mem_info['MemAvailable']} SwapTotal={mem_info['SwapTotal']} SwapFree={mem_info['SwapFree']}",
                               file=sys.stderr, flush=True)
+                        
+                        # Write to grill log for later investigation
+                        _write_grill_log(slug, sid, frame["message"], code, sig, mem_info, root)
                     yield _sse_frame(frame)
                     continue
+                if isinstance(frame, dict) and frame.get("type") == "text":
+                    content_seen = True
                 yield line + "\n"
     except Exception as e:
         if terminal_sent:
@@ -318,6 +364,15 @@ def stream_turn(slug: str, sid: str, message: str | None, root: Path | None = No
             message_text = f"model call failed: {e}"
         yield _sse_frame({"type": "error", "turn": turn, "message": message_text, "retryable": True})
         return
+    
+    # Check if we received any content (empty stream)
+    if not content_seen and not failed_seen:
+        yield _sse_frame({
+            "type": "error",
+            "turn": turn,
+            "message": "Empty response from model - check account or usage limits",
+            "retryable": False
+        })
 
 
 def retry_session(slug: str, sid: str, root: Path | None = None) -> dict:

@@ -104,9 +104,12 @@ class TestInterviewerKillEvent(unittest.TestCase):
                 self.assertEqual(error_frame["type"], "error")
                 self.assertEqual(error_frame["code"], "interviewer_killed")
                 self.assertEqual(error_frame["session_id"], sid)
-                self.assertEqual(
-                    error_frame["message"],
-                    "The interviewer was stopped (killed by the system, usually memory pressure). Nothing was lost."
+                # Message should reflect actual memory pressure or show exit code/signal
+                self.assertIn("The interviewer was killed", error_frame["message"])
+                self.assertTrue(
+                    error_frame["message"].endswith("Nothing was lost.") or
+                    "exit=137" in error_frame["message"] or
+                    "signal=SIGKILL" in error_frame["message"]
                 )
                 self.assertEqual(error_frame["last_round"], 2)  # turn is incremented from initial turns=1
                 self.assertTrue(error_frame.get("retryable"))
