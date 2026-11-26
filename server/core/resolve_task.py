@@ -20,7 +20,7 @@ from . import status
 QUEUE_STATES = status.QUEUE_STATES
 
 
-def resolve_task_id(pipeline_dir: str | Path, stored_id: str) -> dict[str, Any]:
+def resolveTaskId(pipeline_dir: str | Path, stored_id: str) -> dict[str, Any]:
     """Resolve a stored task ID to its full form.
 
     Tries, in order:
@@ -66,20 +66,36 @@ def resolve_task_id(pipeline_dir: str | Path, stored_id: str) -> dict[str, Any]:
     if len(candidates) == 1:
         return {"resolved": candidates[0], "candidates": candidates}
     
-    # 3. Title match (read each task file and check title)
+    # 3. Title match (read each task file and check title field)
     for state in QUEUE_STATES:
         state_dir = pipeline_path / "queue" / state
         if state_dir.is_dir():
             for task_file in state_dir.glob("*.json"):
-                if stored_id.lower() in task_file.stem.lower():
-                    candidates.append(task_file.stem)
+                if task_file.stem in [c for c in candidates]:
+                    continue  # skip already matched
+                try:
+                    record = json.loads(task_file.read_text(encoding="utf-8"))
+                    title = str(record.get("title") or "")
+                    if stored_id.lower() in title.lower():
+                        candidates.append(task_file.stem)
+                except (OSError, ValueError):
+                    pass
     
     for archived_dir in pipeline_path.glob("done/_archived*"):
         if archived_dir.is_dir():
             for task_file in archived_dir.glob("*.json"):
-                if stored_id.lower() in task_file.stem.lower():
-                    if task_file.stem not in candidates:
+                if task_file.stem in [c for c in candidates]:
+                    continue  # skip already matched
+                try:
+                    record = json.loads(task_file.read_text(encoding="utf-8"))
+                    title = str(record.get("title") or "")
+                    if stored_id.lower() in title.lower():
                         candidates.append(task_file.stem)
+                except (OSError, ValueError):
+                    pass
+    
+    if len(candidates) == 1:
+        return {"resolved": candidates[0], "candidates": candidates}
     
     if candidates:
         return {"resolved": stored_id, "candidates": candidates}

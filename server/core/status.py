@@ -24,7 +24,7 @@ QUEUE_STATES = ("adhoc", "pending", "drafting", "review", "approved", "blocked",
 
 def find_task(pipeline_dir: str, task_id: str) -> tuple[str | None, dict | None]:
     """The queue state and record of a task, or (None, None). Looks in every live state, then the done archives.
-    Falls back to resolve_task.resolve_task_id if exact lookup fails."""
+    Falls back to resolve_task.resolveTaskId if exact lookup fails."""
     q = Path(pipeline_dir) / "queue"
     spots = [(s, q / s / f"{task_id}.json") for s in QUEUE_STATES if s != "drafting"]
     spots += [("archived", p) for p in (q / "done" / "_archived_no_action" / f"{task_id}.json",)]
@@ -43,7 +43,7 @@ def find_task(pipeline_dir: str, task_id: str) -> tuple[str | None, dict | None]
     
     # Fallback: try to resolve the task ID (handles truncated/partial IDs)
     from . import resolve_task
-    resolved = resolve_task.resolve_task_id(pipeline_dir, task_id)
+    resolved = resolve_task.resolveTaskId(pipeline_dir, task_id)
     if resolved["resolved"] != task_id:
         # Found a match via prefix or title
         return find_task(pipeline_dir, resolved["resolved"])
