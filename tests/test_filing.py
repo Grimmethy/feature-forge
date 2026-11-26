@@ -539,5 +539,104 @@ class RegistryTests(Base):
             filing.project_for("alpha")
 
 
+class TwoRepoFilingTests(Base):
+    """Each piece routes to the pipeline of its own repo."""
+
+    def _make_two_repo(self, extra):
+        reg = self.tmp / "projects.json"
+        reg.write_text(json.dumps([
+            {"repoRoot": "/r/alpha", "pipelineDir": "/p/alpha-pipeline", "domainsPath": "/p/alpha-pipeline/d.json", "label": "alpha"},
+            {"repoRoot": "/r/beta", "pipelineDir": "/p/beta-pipeline", "domainsPath": "/p/beta-pipeline/d.json", "label": "beta"},
+        ]))
+        os.environ["FEATUREFORGE_PROJECTS"] = str(reg)
+        store.write_file(self.slug, "plan.md", "# Plan\n\nTwo repos.", self.root)
+        store.write_file(self.slug, "checklist.md", extra, self.root)
+
+    def test_each_piece_queues_to_its_own_repo_pipeline(self):
+        """Two pieces, two repos: each task runs in the right pipeline env."""
+        self._make_two_repo(
+            "# Checklist: Thing\n\n"
+            "- [ ] FF-1 Step\n"
+            "  - [ ] 1a Alpha piece\n"
+            "    Repo: alpha\n"
+            "    Work for alpha.\n"
+            "  - [ ] 1b Beta piece\n"
+            "    Repo: beta\n"
+            "    Work for beta.\n"
+        )
+        self.file("FF-1")
+        pipelines = [c[1]["env"]["AGENT_MANAGER_PIPELINE_DIR"] for c in self.calls]
+        self.assertEqual(pipelines, ["/p/alpha-pipeline", "/p/beta-pipeline"])
+
+    def test_unknown_repo_blocks_the_whole_filing(self):
+        """A piece naming an unregistered repo blocks before any task is queued."""
+        self._make_two_repo(
+            "# Checklist: Thing\n\n"
+            "- [ ] FF-1 Step\n"
+            "  - [ ] 1a Good\n"
+            "    Repo: alpha\n"
+            "    Work.\n"
+            "  - [ ] 1b Bad\n"
+            "    Repo: ghost\n"
+            "    Work.\n"
+        )
+        with self.assertRaises(filing.FilingError) as ctx:
+            self.file("FF-1")
+        self.assertIn("unknown repo 'ghost' for piece 1b", str(ctx.exception))
+        self.assertEqual(self.calls, [])
+
+    def test_repo_header_swapped_once_for_cross_repo_piece(self):
+        """When a piece targets a different repo, its 'Repo: <name>.' header replaces the feature header exactly once."""
+        self._make_two_repo(
+            "# Checklist: Thing\n\n"
+            "- [ ] FF-1 Step\n"
+            "  - [ ] 1a Alpha piece\n"
+            "    Repo: alpha\n"
+            "    Work for alpha.\n"
+            "  - [ ] 1b Beta piece\n"
+            "    Repo: beta\n"
+            "    Work for beta.\n"
+        )
+        seen = []
+        orig = filing.runner
+        def spy(cmd, **kw):
+            seen.append(json.loads(Path(cmd[cmd.index("--prompt-context-file") + 1]).read_text())["rawText"])
+            return orig(cmd, **kw)
+        filing.runner = spy
+        try:
+            self.file("FF-1")
+            self.assertIn("Repo: alpha.", seen[0])
+            self.assertNotIn("Repo: beta.", seen[0])
+            self.assertIn("Repo: beta.", seen[1])
+            self.assertNotIn("Repo: alpha.", seen[1])
+        finally:
+            filing.runner = orig
+
+    def test_checklist_records_task_id_and_repo_per_piece(self):
+        """Each piece entry in the response records the task id and the repo it was filed to."""
+        self._make_two_repo(
+            "# Checklist: Thing\n\n"
+            "- [ ] FF-1 Step\n"
+            "  - [ ] 1a Alpha piece\n"
+            "    Repo: alpha\n"
+            "    Work for alpha.\n"
+            "  - [ ] 1b Beta piece\n"
+            "    Repo: beta\n"
+            "    Work for beta.\n"
+        )
+        r = self.file("FF-1")
+        by_piece = {p["piece"]: p for p in r["pieces"]}
+        self.assertEqual(by_piece["1a"]["task"], "adhoc-task-1")
+        self.assertEqual(by_piece["1a"]["repo"], "alpha")
+        self.assertEqual(by_piece["1b"]["task"], "adhoc-task-2")
+        self.assertEqual(by_piece["1b"]["repo"], "beta")
+        # The checklist now carries the repo alongside task/filed.
+        entries = checklist.parse(store.read_file(self.slug, "checklist.md", self.root))
+        it = next(i for i in checklist.items(entries) if i["id"] == "FF-1")
+        ps = checklist.pieces(it)
+        self.assertEqual(next(p for p in ps if p["id"] == "1a")["meta"]["repo"], "alpha")
+        self.assertEqual(next(p for p in ps if p["id"] == "1b")["meta"]["repo"], "beta")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -290,7 +290,7 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
     if blocked and not accept_lint:
         raise FilingError(
             "polling language in piece(s) " + ", ".join(sorted(blocked)) + ": "
-            + " or ".join(w for w in warnings if any(w.startswith(b + ": " for b in blocked)))
+            + " or ".join(w for w in warnings if any(w.startswith(b + ": ") for b in blocked))
             + "; reword to use a trigger, or accept the warning"
         )
     todo = [p for p in todo if p["id"] not in blocked]
@@ -353,6 +353,7 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
             for shared in sorted(p_files & prev_files):
                 warnings.append(f"{p['id']} and {prev['id']} both name {shared}; they can run in parallel and may conflict")
         _target = next(r for r in routed if r["piece"]["id"] == p["id"])
+        target_project = project_for(_target["targetRepo"])
         text = record_text(slug, item_id, root, p["id"])
         if _target["targetRepo"] != feature_repo:
             text = re.sub(
@@ -363,19 +364,19 @@ def _file_pieces(slug, entries, it, item_id, piece_id, accept_lint, root, projec
                 flags=re.MULTILINE,
             )
         try:
-            task = _queue_task(project, f"{item_id}/{p['id']} {p['title']}", text, f"feature-forge:{slug}/{item_id}/{p['id']}", deps)
+            task = _queue_task(target_project, f"{item_id}/{p['id']} {p['title']}", text, f"feature-forge:{slug}/{item_id}/{p['id']}", deps)
         except FilingError as e:
             raise FilingError(f"{e} (filed so far: {', '.join(x['task'] for x in out['pieces']) or 'nothing'})")
         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        checklist.update_piece(it, p["id"], {"task": task, "filed": stamp})
+        checklist.update_piece(it, p["id"], {"task": task, "filed": stamp, "repo": _target["targetRepo"]})
         it["meta"].setdefault("filed", stamp)                   # the first piece filed locks the item
-        it["meta"]["pipeline"] = format_pipeline_stamp(project["label"])
+        it["meta"]["pipeline"] = format_pipeline_stamp(target_project["label"])
         it["dirty"] = True
         _write_entries(slug, entries, root)                     # each task exists now: record it before anything else can fail
         entry = {"piece": p["id"], "status": "filed", "repo": _target["targetRepo"], "task": task}
         if premium:
             try:
-                _post(f"/api/task-anywhere/{task}/premium-priority?project={project['repoRoot']}", {"enabled": True, "by": "operator-ui"})
+                _post(f"/api/task-anywhere/{task}/premium-priority?project={target_project['repoRoot']}", {"enabled": True, "by": "operator-ui"})
             except FilingError as e:
                 entry["premiumError"] = str(e)
         out["pieces"].append(entry)
